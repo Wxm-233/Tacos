@@ -116,7 +116,51 @@ pub extern "C" fn main(hart_id: usize, dtb: usize) -> ! {
 
     #[cfg(feature = "shell")]
     {
-        // TODO: Lab 0
+        use alloc::string::String;
+        struct Console;
+        impl Console {
+            #[inline]
+            fn putchar(ch: u8) {
+                sbi::console_putchar(ch as usize);
+            }
+
+            // #[inline]
+            // fn getchar() -> u8 {
+            //     sbi::console_getchar() as u8
+            // }
+        }
+
+        loop {
+            kprint!("PKUOS> ");
+            let mut input = String::new();
+
+            loop {
+                let c = Console::getchar();
+                match c {
+                    b'\r' | b'\n' => {
+                        // kprintln!("");
+                        break;
+                    }
+                    8 | 127 => {
+                        input.pop();
+                        kprint!("\x08 \x08");
+                    }
+                    _ => {
+                        input.push(c as char);
+                        // Console::putchar(c);
+                    }
+                }
+            }
+
+            match input.as_str() {
+                "exit" => break,
+                "whoami" => kprintln!("2200013188"),
+                "" => {}
+                _ => kprintln!("Invalid command"),
+            }
+
+            // kprintln!("You entered: {}", input);
+        }
     }
 
     DISKFS.unmount();

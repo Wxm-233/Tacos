@@ -1,15 +1,34 @@
 {
-    "configurations": [
+  "configurations": [
+    {
+      "type": "gdb",
+      "request": "attach",
+      "name": "Attach to gdbserver",
+      "executable": "${workspaceFolder}/target/riscv64gc-unknown-none-elf/debug/tacos",
+      "target": ":1234",
+      "remote": true,
+      "cwd": "${workspaceRoot}",
+      "gdbpath": "/usr/bin/gdb-multiarch",
+      "valuesFormatting": "prettyPrinters"
+    },
+    {
+      "name": "C/C++ Runner: Debug Session",
+      "type": "cppdbg",
+      "request": "launch",
+      "args": [],
+      "stopAtEntry": false,
+      "externalConsole": true,
+      "cwd": "d:/Documents/code/Tacos",
+      "program": "d:/Documents/code/Tacos/build/Debug/outDebug",
+      "MIMode": "gdb",
+      "miDebuggerPath": "gdb",
+      "setupCommands": [
         {
-            "type": "gdb",
-            "request": "attach",
-            "name": "Attach to gdbserver",
-            "executable": "${workspaceFolder}/target/riscv64gc-unknown-none-elf/debug/tacos",
-            "target": ":1234",
-            "remote": true,
-            "cwd": "${workspaceRoot}",
-            "gdbpath": "/usr/bin/gdb-multiarch",
-            "valuesFormatting": "prettyPrinters"
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
         }
-    ]
+      ]
+    }
+  ]
 }

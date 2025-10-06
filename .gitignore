@@ -39,3 +39,6 @@ mkfs
 
 # Zed
 .zed
+
+# VSCode settings
+.vscode/*
