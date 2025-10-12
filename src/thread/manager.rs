@@ -10,7 +10,7 @@ use crate::mem::KernelPgTable;
 use crate::sbi::interrupt;
 use crate::sync::Lazy;
 use crate::thread::{
-    schedule, switch, Builder, Mutex, Schedule, Scheduler, Status, Thread, MAGIC, PRI_DEFAULT, PRI_MIN
+    current, schedule, switch, Builder, Mutex, Schedule, Scheduler, Status, Thread, MAGIC, PRI_DEFAULT, PRI_MIN
 };
 
 /* --------------------------------- MANAGER -------------------------------- */
@@ -73,7 +73,7 @@ impl Manager {
     pub fn schedule(&self) {
         let old = interrupt::set(false);
 
-        let next = self.scheduler.lock().schedule();
+        let next = self.scheduler.lock().schedule(current());
 
         // Make sure there's at least one thread runnable.
         assert!(

@@ -31,6 +31,7 @@ pub struct Thread {
     status: Mutex<Status>,
     context: Mutex<Context>,
     pub priority: AtomicU32,
+    base_priority: AtomicU32,
     pub userproc: Option<UserProc>,
     pub pagetable: Option<Mutex<PageTable>>,
 }
@@ -54,6 +55,7 @@ impl Thread {
             status: Mutex::new(Status::Ready),
             context: Mutex::new(Context::new(stack, entry)),
             priority: AtomicU32::new(priority),
+            base_priority: AtomicU32::new(priority),
             userproc,
             pagetable: pagetable.map(Mutex::new),
         }
@@ -104,6 +106,15 @@ impl Drop for Thread {
         if let Some(pt) = &self.pagetable {
             unsafe { pt.lock().destroy() };
         }
+    }
+}
+
+impl Thread {
+    pub fn set_base_priority(&self, priority: u32) {
+        self.base_priority.store(priority, SeqCst);
+    }
+    pub fn effective_priority(&self) -> u32 {
+        self.base_priority.load(SeqCst)
     }
 }
 
@@ -181,6 +192,8 @@ impl Builder {
         kprintln!("[THREAD] create {:?}", new_thread);
 
         Manager::get().register(new_thread.clone());
+
+        crate::thread::schedule();
 
         // Off you go
         new_thread

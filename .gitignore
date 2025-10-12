@@ -42,3 +42,6 @@ mkfs
 
 # VSCode settings
 .vscode/*
+
+# hw
+hw/
