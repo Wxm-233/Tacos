@@ -4,11 +4,19 @@ use core::cell::RefCell;
 use crate::sync::{Lock, Semaphore};
 use crate::thread::{self, Thread};
 
+use alloc::vec::Vec;
+
 /// Sleep lock. Uses [`Semaphore`] under the hood.
 #[derive(Clone)]
 pub struct Sleep {
     inner: Semaphore,
     holder: RefCell<Option<Arc<Thread>>>,
+}
+
+impl Sleep {
+    pub fn get_holder(&self) -> RefCell<Option<Arc<Thread>>> {
+        self.holder.clone()
+    }
 }
 
 impl Default for Sleep {

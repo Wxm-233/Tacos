@@ -3,7 +3,7 @@ use alloc::sync::Arc;
 use core::cell::{Cell, RefCell};
 
 use crate::sbi;
-use crate::thread::{self, Thread};
+use crate::thread::{self, Thread, schedule};
 
 /// Atomic counting semaphore
 ///
@@ -53,18 +53,36 @@ impl Semaphore {
         let old = sbi::interrupt::set(false);
         let count = self.value.replace(self.value() + 1);
 
-        // Check if we need to wake up a sleeping waiter
-        if let Some(thread) = self.waiters.borrow_mut().pop_back() {
-            assert_eq!(count, 0);
-
-            thread::wake_up(thread.clone());
+        let mut should_preempt = false;
+        
+        {
+            self.waiters.borrow_mut()
+                .make_contiguous()
+                .sort_by_key(|s| s.effective_priority());
         }
 
-        sbi::interrupt::set(old);
-    }
+        // Check if we need to wake up a sleeping waiter
+        if let Some(thread) = self.waiters
+            .borrow_mut()
+            .pop_back() {
+                assert_eq!(count, 0);
+                should_preempt = thread.effective_priority() >= thread::current().effective_priority();
+                thread::wake_up(thread.clone());
+            }
+            
+            sbi::interrupt::set(old);
+
+            if should_preempt {
+                schedule();
+            }
+        }
 
     /// Get the current value of a semaphore
     pub fn value(&self) -> usize {
         self.value.get()
+    }
+
+    pub fn get_priority(&self) -> u32 {
+        self.waiters.borrow().iter().map(|t| t.effective_priority()).max().unwrap_or(0)
     }
 }

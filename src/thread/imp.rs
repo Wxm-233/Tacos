@@ -193,7 +193,9 @@ impl Builder {
 
         Manager::get().register(new_thread.clone());
 
-        crate::thread::schedule();
+        if new_thread.effective_priority() >= Manager::get().current.lock().effective_priority() {
+            crate::thread::schedule();
+        }
 
         // Off you go
         new_thread
