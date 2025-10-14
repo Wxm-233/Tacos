@@ -102,8 +102,8 @@ pub fn sleep(ticks: i64) {
     let old = interrupt::set(false);
 
     let cur = current();
-    cur.set_status(Status::Blocked);
     crate::thread::alarm::add(wake, cur.clone());
+    cur.set_status(Status::Blocked);
 
     #[cfg(feature = "debug")]
     kprintln!("[THREAD] thread {:?} will sleep until {:?} ms", cur.id(), wake * 100);
