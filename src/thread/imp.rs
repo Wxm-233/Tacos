@@ -38,8 +38,8 @@ pub struct Thread {
     pub userproc: Option<UserProc>,
     pub pagetable: Option<Mutex<PageTable>>,
 
-    pub required_lock: Mutex<Option<Primitive>>,
-    pub holding_locks: Mutex<Vec<Primitive>>,
+    pub donating: Mutex<Option<Arc<Thread>>>,
+    pub donators: Mutex<Vec<Arc<Thread>>>,
 }
 
 impl Thread {
@@ -65,8 +65,8 @@ impl Thread {
             userproc,
             pagetable: pagetable.map(Mutex::new),
 
-            required_lock: Mutex::new(None),
-            holding_locks: Mutex::new(Vec::new()),
+            donating: Mutex::new(None),
+            donators: Mutex::new(Vec::new()),
         }
     }
 
@@ -130,26 +130,29 @@ impl Thread {
         self.priority.store(priority, SeqCst);
     }
 
-    pub fn get_lock_holder(&self) -> Option<Arc<Thread>> {
-        self.required_lock
-            .lock()
-            .as_ref()
-            .and_then(|cur: &Primitive| cur.get_holder().borrow().clone())
-    }
-
     pub fn donate(&self) {
-        if let Some(lock_holder) = self.get_lock_holder() {
-            if (self.effective_priority() > lock_holder.effective_priority()) {
-                lock_holder.set_effective_priority(self.effective_priority());
-                lock_holder.donate();
+        if let Some(donating) = self.donating.lock().clone() {
+            if self.effective_priority() > donating.effective_priority() {
+                donating.set_effective_priority(self.effective_priority());
+                # [cfg(feature = "debug")]
+                {
+                    kprintln!(
+                        "Thread {:?} with priority {} is donating to thread {:?} with priority {}",
+                        self,
+                        self.effective_priority(),
+                        donating,
+                        donating.effective_priority()
+                    );
+                }
+                donating.donate();
             }
         }
     }
 
     pub fn recompute_priority(&self) {
         let mut max_donated_priority = self.base_priority.load(SeqCst);
-        for lock in self.holding_locks.lock().iter() {
-            max_donated_priority = max_donated_priority.max(lock.get_priority());
+        for donator in self.donators.lock().iter() {
+            max_donated_priority = max_donated_priority.max(donator.effective_priority());
         }
         self.priority.store(max_donated_priority, SeqCst);
     }

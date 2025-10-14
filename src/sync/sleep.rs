@@ -6,10 +6,11 @@ use core::fmt::{self, Debug};
 
 use crate::sbi::interrupt;
 
-use crate::sync::{Lock, Semaphore};
-use crate::thread::{self, schedule, Thread};
+use crate::sync::{Lock, Primitive, Semaphore};
+use crate::thread::{self, current, schedule, Thread};
 
 use alloc::vec::Vec;
+use core::borrow::{BorrowMut, Borrow};
 
 /// Sleep lock. Uses [`Semaphore`] under the hood.
 #[derive(Clone)]
@@ -55,26 +56,33 @@ impl Lock for Sleep {
     fn acquire(&self) {
         let old = interrupt::set(false);
 
-        *thread::current().required_lock.lock() = Some(self.clone());
-        thread::current().donate();
-        self.waiting_list.borrow_mut().push(thread::current());
-
         # [cfg(feature = "debug")]
         {
-            kprintln!("Before acquired, {:?}'s waiting list is {:?}", self, self.waiting_list.borrow());
+            kprintln!("Before acquired, it's a {:?}", self);
+            kprintln!("Before acquiring, current thread {:?} with priority {:?}",
+                thread::current(),
+                thread::current().effective_priority());
         }
+
+        if let Some(donating) = self.holder.borrow().clone() {
+            *thread::current().donating.lock() = Some(donating.clone());
+            donating.donators.lock().push(thread::current());
+        }
+        thread::current().donate();
+        self.waiting_list.borrow_mut().push(thread::current());
 
         self.inner.down();
 
         self.holder.borrow_mut().replace(thread::current());
-        *thread::current().required_lock.lock() = None;
-        thread::current().holding_locks.lock().push(self.clone().into());
-        self.waiting_list.borrow_mut().retain(|t| !Arc::ptr_eq(t, &thread::current()));
+        *thread::current().donating.lock() = None;
+        self.waiting_list.borrow_mut().retain(|t| t.id() != thread::current().id());
 
         # [cfg(feature = "debug")]
         {
-            kprintln!("After acquired, {:?}'s waiting list is {:?}", self, self.waiting_list.borrow());
-            kprintln!("Current thread {:?} with priority {:?} has acquired {:?}", thread::current(), thread::current().effective_priority(), self);
+            kprintln!("After acquiring, it's a {:?}", self);
+            kprintln!("After acquiring, current thread {:?} with priority {:?}", 
+                thread::current(), 
+                thread::current().effective_priority());
         }
         
         interrupt::set(old);
@@ -88,20 +96,25 @@ impl Lock for Sleep {
             &thread::current()
         ));
         let old = interrupt::set(false);
-        self.holder.borrow_mut().take().unwrap();
-
+        
         # [cfg(feature = "debug")]
         {
-            kprintln!("Before releasing, current thread {:?} with priority {:?} is releasing {:?}", thread::current(), thread::current().effective_priority(), self);
-            kprint!("Current thread is holding locks:");
-            for lock in thread::current().holding_locks.lock().iter() {
-                kprint!("{:?}", lock);
-            }
-            kprintln!();
-            kprintln!("This lock is {:?}", self);
+            kprintln!("Before releasing, it's a {:?}", self);
+            kprintln!("Before releasing, current thread {:?} with priority {:?}",
+                thread::current(), 
+                thread::current().effective_priority());
         }
         
-        thread::current().holding_locks.lock().retain(|x| x.lid != self.lid);
+        self.holder.borrow_mut().take().unwrap();
+
+        current().donators.lock().retain(|t| {
+            for waiting in self.waiting_list.borrow().iter() {
+                if Arc::ptr_eq(t, waiting) {
+                    return false;
+                }
+            }
+            true
+        });
 
         thread::current().recompute_priority();
         interrupt::set(old);
