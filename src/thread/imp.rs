@@ -11,6 +11,9 @@ use crate::sbi::interrupt;
 use crate::thread::Manager;
 use crate::userproc::UserProc;
 
+use crate::sync::Primitive;
+use alloc::vec::Vec;
+
 pub const PRI_DEFAULT: u32 = 31;
 pub const PRI_MAX: u32 = 63;
 pub const PRI_MIN: u32 = 0;
@@ -34,6 +37,9 @@ pub struct Thread {
     base_priority: AtomicU32,
     pub userproc: Option<UserProc>,
     pub pagetable: Option<Mutex<PageTable>>,
+
+    pub required_lock: Mutex<Option<Primitive>>,
+    pub holding_locks: Mutex<Vec<Primitive>>,
 }
 
 impl Thread {
@@ -58,6 +64,9 @@ impl Thread {
             base_priority: AtomicU32::new(priority),
             userproc,
             pagetable: pagetable.map(Mutex::new),
+
+            required_lock: Mutex::new(None),
+            holding_locks: Mutex::new(Vec::new()),
         }
     }
 
@@ -112,9 +121,37 @@ impl Drop for Thread {
 impl Thread {
     pub fn set_base_priority(&self, priority: u32) {
         self.base_priority.store(priority, SeqCst);
+        self.priority.store(priority, SeqCst);
     }
     pub fn effective_priority(&self) -> u32 {
-        self.base_priority.load(SeqCst)
+        self.priority.load(SeqCst)
+    }
+    pub fn set_effective_priority(&self, priority: u32) {
+        self.priority.store(priority, SeqCst);
+    }
+
+    pub fn get_lock_holder(&self) -> Option<Arc<Thread>> {
+        self.required_lock
+            .lock()
+            .as_ref()
+            .and_then(|cur: &Primitive| cur.get_holder().borrow().clone())
+    }
+
+    pub fn donate(&self) {
+        if let Some(lock_holder) = self.get_lock_holder() {
+            if (self.effective_priority() > lock_holder.effective_priority()) {
+                lock_holder.set_effective_priority(self.effective_priority());
+                lock_holder.donate();
+            }
+        }
+    }
+
+    pub fn recompute_priority(&self) {
+        let mut max_donated_priority = self.base_priority.load(SeqCst);
+        for lock in self.holding_locks.lock().iter() {
+            max_donated_priority = max_donated_priority.max(lock.get_priority());
+        }
+        self.priority.store(max_donated_priority, SeqCst);
     }
 }
 

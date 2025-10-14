@@ -70,11 +70,11 @@ impl Semaphore {
                 thread::wake_up(thread.clone());
             }
             
-            sbi::interrupt::set(old);
+        sbi::interrupt::set(old);
 
-            if should_preempt {
-                schedule();
-            }
+        if should_preempt {
+            schedule();
+        }
         }
 
     /// Get the current value of a semaphore
