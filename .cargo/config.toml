@@ -8,4 +8,5 @@ rustflags = [
   "-Cforce-frame-pointers=yes",
   "--verbose",
   "-Csave-temps=yes",
+  "-Awarnings"
 ]

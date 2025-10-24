@@ -12,7 +12,7 @@ const TEST_START: i64 = 10;
 static mut WAKE_TICKS: [[i64; ITERS_MAX]; THREAD_CNT] = [[0; ITERS_MAX]; THREAD_CNT];
 
 fn sleeper(tid: usize, iters: usize) {
-    // Make sure we're at the beginning of a tiemr tick.
+    // Make sure we're at the beginning of a timer tick.
     thread::sleep(1);
 
     // Sleeper with different id has different sleep durations.
