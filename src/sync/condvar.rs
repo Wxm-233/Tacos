@@ -69,10 +69,6 @@ impl Condvar {
 
     /// Wake up one thread from the waiting list
     pub fn notify_one(&self) {
-        {
-            self.0.borrow_mut().make_contiguous().sort_by_key(|s| s.get_priority());
-        }
-
         if let Some(sema) = self.0.borrow_mut().pop_back() {
             sema.up();
         }

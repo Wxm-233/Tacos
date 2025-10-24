@@ -70,12 +70,8 @@ pub extern "C" fn trap_handler(frame: &mut Frame) {
 
         Interrupt(SupervisorTimer) => {
             sbi::timer::tick();
-
             unsafe { riscv::register::sstatus::set_sie() };
-
-            if crate::thread::alarm::tick() {
-                thread::schedule();
-            }
+            thread::schedule();
         }
 
         Interrupt(SupervisorExternal) => unsafe {

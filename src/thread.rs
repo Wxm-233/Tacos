@@ -5,15 +5,11 @@ pub mod manager;
 pub mod scheduler;
 pub mod switch;
 
-pub mod alarm;
-
 pub use self::imp::*;
 pub use self::manager::Manager;
 pub(self) use self::scheduler::{Schedule, Scheduler};
 
 use alloc::sync::Arc;
-
-use crate::{sbi::interrupt, thread::scheduler::priority};
 
 /// Create a new thread
 pub fn spawn<F>(name: &'static str, f: F) -> Arc<Thread>
@@ -74,40 +70,20 @@ pub fn wake_up(thread: Arc<Thread>) {
 }
 
 /// (Lab1) Sets the current thread's priority to a given value
-pub fn set_priority(priority: u32) {
-    let old = interrupt::set(false);
-    let cur = current();
-    cur.set_base_priority(priority);
-    interrupt::set(old);
-    schedule();
-}
+pub fn set_priority(_priority: u32) {}
 
 /// (Lab1) Returns the current thread's effective priority.
 pub fn get_priority() -> u32 {
-    current().effective_priority()
+    0
 }
 
 /// (Lab1) Make the current thread sleep for the given ticks.
 pub fn sleep(ticks: i64) {
-
-    if (ticks <= 0) {
-        return;
-    }
-
     use crate::sbi::timer::{timer_elapsed, timer_ticks};
-    use crate::sbi::interrupt;
 
-    let wake = timer_ticks() + ticks;
+    let start = timer_ticks();
 
-    let old = interrupt::set(false);
-
-    let cur = current();
-    crate::thread::alarm::add(wake, cur.clone());
-    cur.set_status(Status::Blocked);
-
-    #[cfg(feature = "debug")]
-    kprintln!("[THREAD] thread {:?} will sleep until {:?} ms", cur.id(), wake * 100);
-
-    interrupt::set(old);
-    schedule();
+    while timer_elapsed(start) < ticks {
+        schedule();
+    }
 }

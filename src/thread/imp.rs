@@ -11,9 +11,6 @@ use crate::sbi::interrupt;
 use crate::thread::Manager;
 use crate::userproc::UserProc;
 
-use crate::sync::Primitive;
-use alloc::vec::Vec;
-
 pub const PRI_DEFAULT: u32 = 31;
 pub const PRI_MAX: u32 = 63;
 pub const PRI_MIN: u32 = 0;
@@ -34,12 +31,8 @@ pub struct Thread {
     status: Mutex<Status>,
     context: Mutex<Context>,
     pub priority: AtomicU32,
-    base_priority: AtomicU32,
     pub userproc: Option<UserProc>,
     pub pagetable: Option<Mutex<PageTable>>,
-
-    pub donating: Mutex<Option<Arc<Thread>>>,
-    pub donators: Mutex<Vec<Arc<Thread>>>,
 }
 
 impl Thread {
@@ -61,12 +54,8 @@ impl Thread {
             status: Mutex::new(Status::Ready),
             context: Mutex::new(Context::new(stack, entry)),
             priority: AtomicU32::new(priority),
-            base_priority: AtomicU32::new(priority),
             userproc,
             pagetable: pagetable.map(Mutex::new),
-
-            donating: Mutex::new(None),
-            donators: Mutex::new(Vec::new()),
         }
     }
 
@@ -115,46 +104,6 @@ impl Drop for Thread {
         if let Some(pt) = &self.pagetable {
             unsafe { pt.lock().destroy() };
         }
-    }
-}
-
-impl Thread {
-    pub fn set_base_priority(&self, priority: u32) {
-        self.base_priority.store(priority, SeqCst);
-        self.priority.store(priority, SeqCst);
-    }
-    pub fn effective_priority(&self) -> u32 {
-        self.priority.load(SeqCst)
-    }
-    pub fn set_effective_priority(&self, priority: u32) {
-        self.priority.store(priority, SeqCst);
-    }
-
-    pub fn donate(&self) {
-        if let Some(donating) = self.donating.lock().clone() {
-            if self.effective_priority() > donating.effective_priority() {
-                donating.set_effective_priority(self.effective_priority());
-                # [cfg(feature = "debug")]
-                {
-                    kprintln!(
-                        "Thread {:?} with priority {} is donating to thread {:?} with priority {}",
-                        self,
-                        self.effective_priority(),
-                        donating,
-                        donating.effective_priority()
-                    );
-                }
-                donating.donate();
-            }
-        }
-    }
-
-    pub fn recompute_priority(&self) {
-        let mut max_donated_priority = self.base_priority.load(SeqCst);
-        for donator in self.donators.lock().iter() {
-            max_donated_priority = max_donated_priority.max(donator.effective_priority());
-        }
-        self.priority.store(max_donated_priority, SeqCst);
     }
 }
 
@@ -232,10 +181,6 @@ impl Builder {
         kprintln!("[THREAD] create {:?}", new_thread);
 
         Manager::get().register(new_thread.clone());
-
-        if new_thread.effective_priority() >= Manager::get().current.lock().effective_priority() {
-            crate::thread::schedule();
-        }
 
         // Off you go
         new_thread

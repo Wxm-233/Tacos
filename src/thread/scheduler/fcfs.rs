@@ -12,7 +12,7 @@ impl Schedule for Fcfs {
         self.0.push_front(thread)
     }
 
-    fn schedule(&mut self, current: Arc<Thread>) -> Option<Arc<Thread>> {
+    fn schedule(&mut self) -> Option<Arc<Thread>> {
         self.0.pop_back()
     }
 }
