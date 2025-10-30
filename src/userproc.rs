@@ -15,7 +15,7 @@ use ptr::copy_nonoverlapping;
 
 use crate::fs::File;
 use crate::mem::pagetable::KernelPgTable;
-use crate::thread;
+use crate::thread::{self, manager};
 use crate::trap::{trap_exit_u, Frame};
 
 pub struct UserProc {
@@ -122,6 +122,10 @@ pub fn execute(mut file: File, argv: Vec<String>) -> isize {
 /// Panic if the current thread doesn't own a user process.
 pub fn exit(_value: isize) -> ! {
     // TODO: Lab2.
+    let thread = thread::current();
+    if thread.userproc().is_none() {
+        panic!("exit() called by a non-user thread");
+    }
     thread::exit();
 }
 
@@ -130,8 +134,20 @@ pub fn exit(_value: isize) -> ! {
 /// ## Return
 /// - `Some(exit_value)`
 /// - `None`: if tid was not created by the current thread.
-pub fn wait(_tid: isize) -> Option<isize> {
+pub fn wait(tid: isize) -> Option<isize> {
     // TODO: Lab2.
+    
+    let current = thread::current();
+
+    let child = {
+        let manager = thread::Manager::get();
+        if let Some(child) = manager.find_by_tid(tid) {
+            // Wait for the child thread to exit
+        } else {
+            None
+        }
+    };
+
     Some(-1)
 }
 

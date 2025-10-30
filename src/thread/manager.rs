@@ -143,4 +143,10 @@ impl Manager {
             KernelPgTable::get().activate();
         }
     }
+
+    /// find a child thread by its tid
+    pub fn find_by_tid(&self, tid: isize) -> Option<Arc<Thread>> {
+        let all_threads = self.all.lock();
+        all_threads.iter().find(|t| t.id() == tid).cloned()
+    }
 }

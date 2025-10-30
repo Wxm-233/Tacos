@@ -8,6 +8,7 @@ use core::sync::atomic::{AtomicIsize, AtomicU32, Ordering::SeqCst};
 
 use crate::mem::{kalloc, kfree, PageTable, PG_SIZE};
 use crate::sbi::interrupt;
+use crate::sync::Semaphore;
 use crate::thread::Manager;
 use crate::userproc::UserProc;
 
@@ -33,6 +34,9 @@ pub struct Thread {
     pub priority: AtomicU32,
     pub userproc: Option<UserProc>,
     pub pagetable: Option<Mutex<PageTable>>,
+
+    waited: bool,
+    wait_sema: Option<Arc<crate::sync::Semaphore>>,
 }
 
 impl Thread {
@@ -56,6 +60,8 @@ impl Thread {
             priority: AtomicU32::new(priority),
             userproc,
             pagetable: pagetable.map(Mutex::new),
+            waited: false,
+            wait_sema: None,
         }
     }
 
