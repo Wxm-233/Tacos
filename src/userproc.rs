@@ -113,6 +113,7 @@ pub fn execute(mut file: File, argv: Vec<String>) -> isize {
     thread::Builder::new(move || start(frame))
         .pagetable(pt)
         .userproc(userproc)
+        .parent_tid(thread::current().id())
         .spawn()
         .id()
 }
@@ -139,14 +140,14 @@ pub fn wait(tid: isize) -> Option<isize> {
     
     let current = thread::current();
 
-    let child = {
-        let manager = thread::Manager::get();
-        if let Some(child) = manager.find_by_tid(tid) {
-            // Wait for the child thread to exit
-        } else {
-            None
-        }
-    };
+    // let child = {
+    //     let manager = thread::Manager::get();
+    //     if let Some(child) = manager.find_by_tid(tid) {
+    //         // Wait for the child thread to exit
+    //     } else {
+    //         None
+    //     }
+    // };
 
     Some(-1)
 }

@@ -35,6 +35,8 @@ pub struct Thread {
     pub userproc: Option<UserProc>,
     pub pagetable: Option<Mutex<PageTable>>,
 
+    pub parent_tid: isize,
+
     waited: bool,
     wait_sema: Option<Arc<crate::sync::Semaphore>>,
 }
@@ -47,6 +49,8 @@ impl Thread {
         entry: usize,
         userproc: Option<UserProc>,
         pagetable: Option<PageTable>,
+
+        parent_tid: isize,
     ) -> Self {
         /// The next thread's id
         static TID: AtomicIsize = AtomicIsize::new(0);
@@ -60,6 +64,9 @@ impl Thread {
             priority: AtomicU32::new(priority),
             userproc,
             pagetable: pagetable.map(Mutex::new),
+
+            parent_tid,
+
             waited: false,
             wait_sema: None,
         }
@@ -87,6 +94,10 @@ impl Thread {
 
     pub fn overflow(&self) -> bool {
         unsafe { (self.stack as *const usize).read() != MAGIC }
+    }
+
+    pub fn userproc(&self) -> Option<&UserProc> {
+        self.userproc.as_ref()
     }
 }
 
@@ -120,6 +131,8 @@ pub struct Builder {
     function: usize,
     userproc: Option<UserProc>,
     pagetable: Option<PageTable>,
+
+    parent_tid: isize,
 }
 
 impl Builder {
@@ -136,6 +149,7 @@ impl Builder {
             function: function as usize,
             userproc: None,
             pagetable: None,
+            parent_tid: -1,
         }
     }
 
@@ -159,6 +173,11 @@ impl Builder {
         self
     }
 
+    pub fn parent_tid(mut self, parent_tid: isize) -> Self {
+        self.parent_tid = parent_tid;
+        self
+    }
+
     pub fn build(self) -> Arc<Thread> {
         let stack = kalloc(STACK_SIZE, STACK_ALIGN) as usize;
 
@@ -172,6 +191,7 @@ impl Builder {
             self.function,
             self.userproc,
             self.pagetable,
+            self.parent_tid,
         ))
     }
 
