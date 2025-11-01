@@ -46,3 +46,6 @@ mkfs
 # hw
 /hw
 /doc2
+
+# test log
+test_log.txt
