@@ -129,10 +129,10 @@ pub fn execute(mut file: File, argv: Vec<String>) -> isize {
 /// Panic if the current thread doesn't own a user process.
 pub fn exit(_value: isize) -> ! {
     // TODO: Lab2.
-    // let thread = thread::current();
-    // if thread.userproc().is_none() {
-    //     panic!("exit() called by a non-user thread");
-    // }
+    let current = thread::current();
+    if current.userproc().is_none() {
+        panic!("exit() called by a non-user thread");
+    }
     thread::exit();
 }
 
