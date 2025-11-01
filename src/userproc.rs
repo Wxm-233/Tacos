@@ -6,12 +6,8 @@ mod load;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::arch::asm;
-use core::convert::TryInto;
 use core::mem::MaybeUninit;
-use core::ptr::write_bytes;
 use riscv::register::sstatus;
-
-use ptr::copy_nonoverlapping;
 
 use crate::fs::File;
 use crate::mem::PhysAddr;
@@ -22,7 +18,6 @@ use crate::trap::{trap_exit_u, Frame};
 use core::convert::TryInto;
 use core::ptr::write_bytes;
 use ptr::copy_nonoverlapping;
-use crate::sbi::interrupt;
 
 use alloc::slice;
 use crate::mem::palloc::UserPool;
@@ -74,50 +69,6 @@ pub fn execute(mut file: File, argv: Vec<String>) -> isize {
     let userproc = UserProc::new(file);
 
     // TODO: (Lab2) Pass arguments to user program
-    
-    let mut sp = exec_info.init_sp;
-    let mut arg_ptrs = Vec::new();
-    let mut total_size = 0;
-
-    for arg in argv.iter().rev() {
-        let arg_bytes = arg.as_bytes();
-        let arg_len = arg_bytes.len();
-        total_size += arg_len + 1; // +1 for NULL terminator
-
-        if total_size > 4096 {
-            break; // Limit reached
-        }
-
-        sp -= (arg_len + 1) as usize;
-
-        unsafe {
-            copy_nonoverlapping(arg_bytes.as_ptr(), sp as *mut u8, arg_len);
-            write_bytes((sp + arg_len) as *mut u8, 0, 1); // NULL terminator
-        }
-        arg_ptrs.push(sp);
-    }
-
-    arg_ptrs.push(0);
-
-    for &ptr in arg_ptrs.iter().rev() {
-        sp -= core::mem::size_of::<usize>();
-        unsafe {
-            write_bytes(sp as *mut usize, ptr.try_into().unwrap(), core::mem::size_of::<usize>());
-        }
-    }
-
-    let argc = argv.len();
-    let argv: usize = sp;
-
-    frame.x[10] = argc; // a0
-    frame.x[11] = argv; // a1
-
-    #[cfg(feature = "debug")]
-    kprintln!(
-        "[PROCESS] The process to be executed has argc: {}, argv: {:?}",
-        argc,
-        arg_ptrs
-    );
 
     let mut sp = PhysAddr::from_pa(exec_info.init_sp).into_va();
     let mut arg_ptrs = Vec::new();
@@ -178,10 +129,10 @@ pub fn execute(mut file: File, argv: Vec<String>) -> isize {
 /// Panic if the current thread doesn't own a user process.
 pub fn exit(_value: isize) -> ! {
     // TODO: Lab2.
-    let thread = thread::current();
-    if thread.userproc().is_none() {
-        panic!("exit() called by a non-user thread");
-    }
+    // let thread = thread::current();
+    // if thread.userproc().is_none() {
+    //     panic!("exit() called by a non-user thread");
+    // }
     thread::exit();
 }
 
