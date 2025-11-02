@@ -21,6 +21,7 @@ pub mod trap;
 pub mod userproc;
 
 pub mod childinfo;
+pub mod fdlist;
 
 #[cfg(feature = "test")]
 #[path = "../test/mod.rs"]

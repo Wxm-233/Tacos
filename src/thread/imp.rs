@@ -24,6 +24,7 @@ pub type Mutex<T> = crate::sync::Mutex<T, crate::sync::Intr>;
 
 use crate::childinfo::ChildInfo;
 use alloc::vec::Vec;
+use crate::fdlist::FDList;
 
 /* --------------------------------- Thread --------------------------------- */
 /// All data of a kernel thread
@@ -40,6 +41,7 @@ pub struct Thread {
 
     pub children: Mutex<Vec<ChildInfo>>,
     pub parent: Mutex<Option<Arc<Thread>>>,
+    pub fdlist: Mutex<FDList>,
 }
 
 impl Thread {
@@ -68,6 +70,7 @@ impl Thread {
 
             parent: Mutex::new(parent),
             children: Mutex::new(Vec::new()),
+            fdlist: Mutex::new(FDList::new()),
         }
     }
 
