@@ -28,7 +28,15 @@ impl Manager {
     pub fn get() -> &'static Self {
         static TMANAGER: Lazy<Manager> = Lazy::new(|| {
             // Manully create initial thread.
-            let initial = Arc::new(Thread::new("Initial", bootstack as usize, PRI_DEFAULT, 0, None, None, -1));
+            let initial = Arc::new(Thread::new(
+                "Initial",
+                bootstack as usize,
+                PRI_DEFAULT,
+                0,
+                None,
+                None,
+                None,
+            ));
             unsafe { (bootstack as *mut usize).write(MAGIC) };
             initial.set_status(Status::Running);
 
@@ -80,7 +88,10 @@ impl Manager {
             self.current.lock().status() == Status::Running || next.is_some(),
             "no thread is ready"
         );
-        assert!(!self.current.lock().overflow(), "Current thread has overflowed its stack.");
+        assert!(
+            !self.current.lock().overflow(),
+            "Current thread has overflowed its stack."
+        );
 
         if let Some(next) = next {
             assert_eq!(next.status(), Status::Ready);

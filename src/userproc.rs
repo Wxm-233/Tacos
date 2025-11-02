@@ -7,20 +7,26 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::arch::asm;
 use core::mem::MaybeUninit;
+use core::num::Wrapping;
+use core::ops::Sub;
+use core::panic;
 use riscv::register::sstatus;
 
 use crate::fs::File;
-use crate::mem::PhysAddr;
+use crate::mem::{PageAlign, PageTable, PhysAddr};
 use crate::mem::pagetable::KernelPgTable;
-use crate::thread::{self, manager};
+use crate::{childinfo, sbi};
+use crate::sync::Semaphore;
+use crate::thread::{self, Manager, manager};
 use crate::trap::{trap_exit_u, Frame};
 
 use core::convert::TryInto;
 use core::ptr::write_bytes;
 use ptr::copy_nonoverlapping;
-
-use alloc::slice;
-use crate::mem::palloc::UserPool;
+use alloc::sync::Arc;
+use crate::mem::Translate;
+use crate::childinfo::ChildInfo;
+use crate::thread::{schedule};
 
 pub struct UserProc {
     #[allow(dead_code)]
@@ -52,7 +58,7 @@ pub fn execute(mut file: File, argv: Vec<String>) -> isize {
     // switch pagetables.
     let mut pt = KernelPgTable::clone();
 
-    let exec_info = match load::load_executable(&mut file, &mut pt) {
+    let (exec_info, stack_va) = match load::load_executable(&mut file, &mut pt) {
         Ok(x) => x,
         Err(_) => unsafe {
             pt.destroy();
@@ -63,77 +69,112 @@ pub fn execute(mut file: File, argv: Vec<String>) -> isize {
     // Initialize frame, pass argument to user.
     let mut frame = unsafe { MaybeUninit::<Frame>::zeroed().assume_init() };
     frame.sepc = exec_info.entry_point;
-    frame.x[2] = exec_info.init_sp;
 
     // Here the new process will be created.
     let userproc = UserProc::new(file);
 
     // TODO: (Lab2) Pass arguments to user program
 
-    let mut sp = PhysAddr::from_pa(exec_info.init_sp).into_va();
+    const LEN_BYTE: usize = core::mem::size_of::<usize>();
+
+    let mut sp = stack_va + 4000;
+    let offset = sp.wrapping_sub(exec_info.init_sp);
     let mut arg_ptrs = Vec::new();
-    for arg in argv.iter().rev() {
-        sp -= arg.len() + 1;
-        sp &= !0xf; // align to 16 bytes
+    for arg in argv.iter() {
+
+        let bytes = (arg.as_bytes().len() / LEN_BYTE + 1) * LEN_BYTE;
+        sp -= bytes;
+
         unsafe {
             #[cfg(feature = "debug")]
             {
                 kprintln!("[STACK] push arg: {} with length {}", arg, arg.len());
             }
             copy_nonoverlapping(arg.as_ptr(), sp as *mut u8, arg.len());
-            write_bytes((sp + arg.len()) as *mut u8, 0, 1);
+            write_bytes((sp + arg.len()) as *mut u8, 0, bytes - arg.len());
         }
-        arg_ptrs.push(sp);
+        arg_ptrs.push(sp.wrapping_add(offset));
     }
 
-    sp -= arg_ptrs.len() * core::mem::size_of::<usize>();
-    sp &= !0xf; // align to 16 bytes
+    sp -= LEN_BYTE; // for null pointer
+    unsafe { write_bytes(sp as *mut u8, 0, LEN_BYTE) }
+
+    sp -= arg_ptrs.len() * LEN_BYTE;
+
     unsafe {
         copy_nonoverlapping(arg_ptrs.as_ptr(), sp as *mut usize, arg_ptrs.len());
     }
 
-    let argc = arg_ptrs.len();
-    let argv: usize = sp;
+    sp -= LEN_BYTE; // for return address
+    unsafe { write_bytes(sp as *mut u8, 0, LEN_BYTE) }
 
-    // frame.x[2]  = sp;
+    let argc = arg_ptrs.len();
+    let argv: usize = sp.wrapping_add(offset).wrapping_add(LEN_BYTE);
+
+    frame.x[2]  = sp.wrapping_add(offset); // sp
     frame.x[10] = argc; // a0
     frame.x[11] = argv; // a1
 
-    #[cfg(feature = "debug")]
-    {
-        kprintln!("[STACK] argc: {}, argv: {:#x}", argc, argv);
-        for i in 0..argc {
-            let arg_ptr: usize = unsafe { *(argv as *const usize).add(i) };
-            let arg_str = unsafe {
-                let mut len = 0;
-                while *((arg_ptr + len) as *const u8) != 0 {
-                    len += 1;
-                }
-                let slice = slice::from_raw_parts(arg_ptr as *const u8, len);
-                core::str::from_utf8_unchecked(slice)
-            };
-            kprintln!("[STACK]   arg[{}]: {:#x} -> {}", i, arg_ptr, arg_str);
-        }
-    }
-
-    thread::Builder::new(move || start(frame))
+    let child = thread::Builder::new(move || start(frame))
         .pagetable(pt)
         .userproc(userproc)
-        .parent_tid(thread::current().id())
-        .spawn()
-        .id()
+        .parent(thread::current())
+        .spawn();
+
+    let childinfo = child.init_child_info();
+    thread::current().children.lock().push(childinfo);
+    child.id()
 }
 
 /// Exits a process.
 ///
 /// Panic if the current thread doesn't own a user process.
-pub fn exit(_value: isize) -> ! {
+pub fn exit(value: isize) -> ! {
     // TODO: Lab2.
+    let old = sbi::interrupt::set(false);
     let current = thread::current();
     if current.userproc().is_none() {
         panic!("exit() called by a non-user thread");
     }
-    thread::exit();
+
+    current.parent.lock().as_ref().map(|parent| {
+        parent
+            .children
+            .lock()
+            .iter_mut()
+            .find(|child| child.tid == current.id())
+            .map(|child_info| {
+                child_info.ptr = None;
+                child_info.exit_code = Some(value);
+                if child_info.is_waiting {
+                    child_info.wait_sema.up();
+                }
+            });
+        parent
+            .children
+            .lock()
+            .retain(|child_info| {
+                child_info.is_waiting
+                || child_info.ptr.is_some()
+                || child_info.exit_code.is_some()
+        })
+    });
+
+    // let current_pt = unsafe { PageTable::effective_pagetable() };
+    
+    {
+        let current = Manager::get().current.lock();
+        
+        #[cfg(feature = "debug")]
+        kprintln!("Exit: {:?}", *current);
+        
+        current.set_status(thread::imp::Status::Dying);
+    } // replace exit() so we can set interrupt here
+    sbi::interrupt::set(old);
+
+    schedule();
+
+    unreachable!("An exited thread shouldn't be scheduled again");
 }
 
 /// Waits for a child thread, which must own a user process.
@@ -143,7 +184,46 @@ pub fn exit(_value: isize) -> ! {
 /// - `None`: if tid was not created by the current thread.
 pub fn wait(tid: isize) -> Option<isize> {
     // TODO: Lab2.
-    Some(0)
+    // let old = sbi::interrupt::set(false);
+    let current = thread::current();
+
+    // for childinfo in current.children.lock().iter_mut() {
+    //     if childinfo.tid == tid {
+    //         if let Some(ret) = childinfo.exit_code {
+    //             childinfo.exit_code = Some(-1);
+    //             return Some(ret);
+    //         } 
+    //     }
+    // }
+
+    let sema = thread::current()
+        .children
+        .lock()
+        .iter_mut()
+        .find(|child_info| child_info.tid == tid)
+        .map(|child_info| {
+            child_info.is_waiting = true;
+            child_info.wait_sema.clone()
+        });
+
+    // divide into 2 lines for debugging
+    sema.map(|sema| {
+        sema.down();
+    });
+
+    let retval = thread::current()
+        .children
+        .lock()
+        .iter_mut()
+        .find(|child_info| child_info.tid == tid)
+        .take()
+        .map(|child_info| child_info.exit_code.unwrap());
+
+    current.children.lock().retain(|child_info| child_info.tid != tid);
+
+    // sbi::interrupt::set(old);
+
+    retval
 }
 
 /// Initializes a user process in current thread.

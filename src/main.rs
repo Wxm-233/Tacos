@@ -20,6 +20,8 @@ pub mod thread;
 pub mod trap;
 pub mod userproc;
 
+pub mod childinfo;
+
 #[cfg(feature = "test")]
 #[path = "../test/mod.rs"]
 mod test;

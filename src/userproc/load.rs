@@ -23,16 +23,19 @@ pub(super) struct ExecInfo {
 /// On success, returns `Ok(usize, usize)`:
 /// - arg0: the entry point of user program
 /// - arg1: the initial sp of user program
-pub(super) fn load_executable(file: &mut File, pagetable: &mut PageTable) -> Result<ExecInfo> {
+pub(super) fn load_executable(
+    file: &mut File,
+    pagetable: &mut PageTable,
+) -> Result<(ExecInfo, usize)> {
     let exec_info = load_elf(file, pagetable)?;
 
     // Initialize user stack.
-    init_user_stack(pagetable, exec_info.init_sp);
+    let stack_va = init_user_stack(pagetable, exec_info.init_sp);
 
     // Forbid modifying executable file when running
     file.deny_write();
 
-    Ok(exec_info)
+    Ok((exec_info, stack_va))
 }
 
 /// Parses the specified executable file and loads segments
@@ -110,7 +113,7 @@ fn load_segment(filebuf: &[u8], phdr: &ProgramHeaderEntry, pagetable: &mut PageT
 }
 
 /// Initializes the user stack.
-fn init_user_stack(pagetable: &mut PageTable, init_sp: usize) {
+fn init_user_stack(pagetable: &mut PageTable, init_sp: usize) -> usize {
     assert!(init_sp % PG_SIZE == 0, "initial sp address misaligns");
 
     // Allocate a page from UserPool as user stack.
@@ -130,4 +133,6 @@ fn init_user_stack(pagetable: &mut PageTable, init_sp: usize) {
         stack_va,
         stack_page_begin
     );
+
+    stack_va as usize
 }

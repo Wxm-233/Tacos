@@ -22,6 +22,9 @@ pub const MAGIC: usize = 0xdeadbeef;
 
 pub type Mutex<T> = crate::sync::Mutex<T, crate::sync::Intr>;
 
+use crate::childinfo::ChildInfo;
+use alloc::vec::Vec;
+
 /* --------------------------------- Thread --------------------------------- */
 /// All data of a kernel thread
 #[repr(C)]
@@ -35,10 +38,8 @@ pub struct Thread {
     pub userproc: Option<UserProc>,
     pub pagetable: Option<Mutex<PageTable>>,
 
-    pub parent_tid: isize,
-
-    waited: bool,
-    wait_sema: Option<Arc<crate::sync::Semaphore>>,
+    pub children: Mutex<Vec<ChildInfo>>,
+    pub parent: Mutex<Option<Arc<Thread>>>,
 }
 
 impl Thread {
@@ -50,7 +51,7 @@ impl Thread {
         userproc: Option<UserProc>,
         pagetable: Option<PageTable>,
 
-        parent_tid: isize,
+        parent: Option<Arc<Thread>>,
     ) -> Self {
         /// The next thread's id
         static TID: AtomicIsize = AtomicIsize::new(0);
@@ -65,10 +66,8 @@ impl Thread {
             userproc,
             pagetable: pagetable.map(Mutex::new),
 
-            parent_tid,
-
-            waited: false,
-            wait_sema: None,
+            parent: Mutex::new(parent),
+            children: Mutex::new(Vec::new()),
         }
     }
 
@@ -99,6 +98,10 @@ impl Thread {
     pub fn userproc(&self) -> Option<&UserProc> {
         self.userproc.as_ref()
     }
+
+    pub fn init_child_info(self: &Arc<Thread>) -> ChildInfo {
+        ChildInfo::new(self.tid, self.name, None, false, Arc::clone(self))
+    }
 }
 
 impl Debug for Thread {
@@ -121,6 +124,13 @@ impl Drop for Thread {
         if let Some(pt) = &self.pagetable {
             unsafe { pt.lock().destroy() };
         }
+
+        self.children.lock().iter().for_each(|child_info| {
+            child_info
+                .ptr
+                .iter()
+                .for_each(|child| *child.parent.lock() = None);
+        });
     }
 }
 
@@ -132,7 +142,7 @@ pub struct Builder {
     userproc: Option<UserProc>,
     pagetable: Option<PageTable>,
 
-    parent_tid: isize,
+    parent: Option<Arc<Thread>>,
 }
 
 impl Builder {
@@ -149,7 +159,7 @@ impl Builder {
             function: function as usize,
             userproc: None,
             pagetable: None,
-            parent_tid: -1,
+            parent: None,
         }
     }
 
@@ -173,8 +183,8 @@ impl Builder {
         self
     }
 
-    pub fn parent_tid(mut self, parent_tid: isize) -> Self {
-        self.parent_tid = parent_tid;
+    pub fn parent(mut self, parent:Arc<Thread>) -> Self {
+        self.parent = Some(parent);
         self
     }
 
@@ -191,7 +201,7 @@ impl Builder {
             self.function,
             self.userproc,
             self.pagetable,
-            self.parent_tid,
+            self.parent,
         ))
     }
 
