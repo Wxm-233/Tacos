@@ -143,17 +143,17 @@ pub fn execute(mut file: File, argv: Vec<String>) -> isize {
 pub fn exit(value: isize) -> ! {
     // TODO: Lab2.
     let old = sbi::interrupt::set(false);
-    let current = thread::current();
-    if current.userproc().is_none() {
-        panic!("exit() called by a non-user thread");
-    }
+    // let current = thread::current();
+    // if current.userproc().is_none() {
+    //     panic!("exit() called by a non-user thread");
+    // }
 
-    current.parent.lock().as_ref().map(|parent| {
+    thread::current().parent.lock().as_ref().map(|parent| {
         parent
             .children
             .lock()
             .iter_mut()
-            .find(|child| child.tid == current.id())
+            .find(|child| child.tid == thread::current().id())
             .map(|child_info| {
                 child_info.ptr = None;
                 child_info.exit_code = Some(value);
