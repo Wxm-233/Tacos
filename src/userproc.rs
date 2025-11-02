@@ -77,13 +77,16 @@ pub fn execute(mut file: File, argv: Vec<String>) -> isize {
 
     const LEN_BYTE: usize = core::mem::size_of::<usize>();
 
-    let mut sp = stack_va + 4000;
-    let offset = sp.wrapping_sub(exec_info.init_sp);
+    let mut sp = stack_va + 4096;
+    let offset = exec_info.init_sp - sp;
     let mut arg_ptrs = Vec::new();
     for arg in argv.iter() {
-
         let bytes = (arg.as_bytes().len() / LEN_BYTE + 1) * LEN_BYTE;
         sp -= bytes;
+
+        if sp < stack_va {
+            return -1;
+        }
 
         unsafe {
             #[cfg(feature = "debug")]
@@ -93,25 +96,33 @@ pub fn execute(mut file: File, argv: Vec<String>) -> isize {
             copy_nonoverlapping(arg.as_ptr(), sp as *mut u8, arg.len());
             write_bytes((sp + arg.len()) as *mut u8, 0, bytes - arg.len());
         }
-        arg_ptrs.push(sp.wrapping_add(offset));
+        arg_ptrs.push(sp + offset);
     }
 
     sp -= LEN_BYTE; // for null pointer
-    unsafe { write_bytes(sp as *mut u8, 0, LEN_BYTE) }
+    if sp < stack_va {
+        return -1;
+    }
+    unsafe { write_bytes(sp as *mut u8, 0, 1) }
 
     sp -= arg_ptrs.len() * LEN_BYTE;
-
+    if sp < stack_va {
+        return -1;
+    }
     unsafe {
         copy_nonoverlapping(arg_ptrs.as_ptr(), sp as *mut usize, arg_ptrs.len());
     }
 
     sp -= LEN_BYTE; // for return address
-    unsafe { write_bytes(sp as *mut u8, 0, LEN_BYTE) }
+    if sp < stack_va {
+        return -1;
+    }
+    unsafe { write_bytes(sp as *mut u8, 0, 1) }
 
     let argc = arg_ptrs.len();
-    let argv: usize = sp.wrapping_add(offset).wrapping_add(LEN_BYTE);
+    let argv: usize = sp + LEN_BYTE + offset;
 
-    frame.x[2]  = sp.wrapping_add(offset); // sp
+    frame.x[2]  = sp + offset; // sp
     frame.x[10] = argc; // a0
     frame.x[11] = argv; // a1
 

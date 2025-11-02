@@ -148,8 +148,7 @@ pub fn syscall_handler(id: usize, args: [usize; 3]) -> isize {
                     return -1;
                 }
             };
-            // thread::current().fdlist.lock().open(file, flag)
-            0
+            thread::current().fdlist.lock().open(file, flag)
         }
         SYS_READ => {
             let fd = args[0] as isize;
@@ -209,7 +208,7 @@ pub fn syscall_handler(id: usize, args: [usize; 3]) -> isize {
                 let current = thread::current();
                 let mut fdlist = current.fdlist.lock();
                 let file = match fdlist.get_by_fd(fd) {
-                    Some(fd_info) if (fd_info.flag & O_WRONLY | O_RDWR) != 0 => &mut fd_info.file,
+                    Some(fd_info) if (fd_info.flag & (O_WRONLY | O_RDWR)) != 0 => &mut fd_info.file,
                     _ => return -1,
                 };
                 match file.write(buf) {
@@ -259,7 +258,7 @@ pub fn syscall_handler(id: usize, args: [usize; 3]) -> isize {
             let current = thread::current();
             let mut fdlist = current.fdlist.lock();
             let file = match fdlist.get_by_fd(fd) {
-                Some(x) => &mut x.file,
+                Some(x) if (x.flag & O_WRONLY) == 0 => &mut x.file,
                 _ => return -1,
             };
 
