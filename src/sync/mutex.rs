@@ -72,11 +72,11 @@ impl<T, L: Lock> Drop for MutexGuard<'_, T, L> {
 
 // Useful in Condvar
 impl<T, L: Lock> MutexGuard<'_, T, L> {
-    pub(super) fn release(&self) {
+    pub fn release(&self) {
         self.0.lock.release();
     }
 
-    pub(super) fn acquire(&self) {
+    pub fn acquire(&self) {
         self.0.lock.acquire();
     }
 }

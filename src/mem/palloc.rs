@@ -5,6 +5,19 @@ use core::cmp::min;
 use crate::mem::utils::*;
 use crate::sync::{Intr, Lazy, Mutex};
 
+use core::array;
+use alloc::collections::VecDeque;
+use alloc::sync::{Arc, Weak};
+use crate::fs::disk::Swap;
+use crate::io::{Seek, SeekFrom, Read, Write};
+use crate::sync::Primitive;
+use crate::thread::{current, Thread};
+use super::{PTEFlags, VM_OFFSET};
+
+pub mod frame;
+
+use mem::palloc::frame::*;
+
 // BuddyAllocator allocates at most `1<<MAX_ORDER` pages at a time
 const MAX_ORDER: usize = 8;
 // How many pages are there in the user memory pool
@@ -54,7 +67,7 @@ impl BuddyAllocator {
     }
 
     /// Allocate n pages and returns the virtual address.
-    unsafe fn alloc(&mut self, n: usize) -> *mut u8 {
+    unsafe fn alloc(&mut self, n: usize) -> Option<*mut u8> {
         assert!(n <= 1 << MAX_ORDER, "request is too large");
 
         let order = n.next_power_of_two().trailing_zeros() as usize;
@@ -72,11 +85,11 @@ impl BuddyAllocator {
                     }
                 }
                 self.allocated += 1 << order;
-                return self.free_lists[order].pop().unwrap().cast();
+                return Some(self.free_lists[order].pop().unwrap().cast());
             }
         }
-
-        unreachable!("memory is exhausted");
+        None
+        // unreachable!("memory is exhausted");
     }
 
     /// Deallocate a chunk of pages
@@ -125,7 +138,7 @@ impl Palloc {
 
     /// Allocate n pages of a consecutive memory segment
     pub unsafe fn alloc(n: usize) -> *mut u8 {
-        Self::instance().lock().alloc(n)
+        Self::instance().lock().alloc(n).unwrap()
     }
 
     /// Free n pages of memory starting at `ptr`
@@ -140,19 +153,29 @@ impl Palloc {
     }
 }
 
-pub struct UserPool(Lazy<Mutex<BuddyAllocator, Intr>>);
+pub struct UserPool(Lazy<Mutex<BuddyAllocator, Primitive>>);
 
 unsafe impl Sync for UserPool {}
 
 impl UserPool {
     /// Allocate n pages of consecutive space
     pub unsafe fn alloc_pages(n: usize) -> *mut u8 {
-        Self::instance().lock().alloc(n)
+        let mut guard = Self::instance().lock();
+        match guard.alloc(n) {
+            Some(ptr) => ptr,
+            _ => {
+                guard.release();
+                swap_page();
+                guard.acquire();
+                guard.alloc(n).unwrap()
+            }
+        }
     }
 
     /// Free n pages of memory starting at `ptr`
     pub unsafe fn dealloc_pages(ptr: *mut u8, n: usize) {
-        Self::instance().lock().dealloc(ptr, n)
+        let mut guard = Self::instance().lock();
+        guard.dealloc(ptr, n);
     }
 
     /// Initialize the page-based allocator
@@ -160,9 +183,44 @@ impl UserPool {
         Self::instance().lock().insert_range(start, end);
     }
 
-    fn instance() -> &'static Mutex<BuddyAllocator, Intr> {
+    fn instance() -> &'static Mutex<BuddyAllocator, Primitive> {
         static USERPOOL: UserPool = UserPool(Lazy::new(|| Mutex::new(BuddyAllocator::empty())));
 
         &USERPOOL.0
+    }
+}
+
+fn swap_page() -> bool {
+    let mut frame_table = GlobalFrameTable::instance().lock();
+    let size = frame_table.used_pages.len();
+    for _ in 0..size*2 {
+        let index = frame_table.used_pages.pop_front().unwrap();
+        let entry = frame_table.entries.get_mut(index).unwrap();
+        let thread = entry.as_ref().unwrap().thread.upgrade();
+
+        let thread = match thread {
+            None => continue,
+            Some(x) => x,
+        };
+        
+        let va = entry.as_ref().unwrap().va;
+        let pt = match thread.pagetable.as_ref() {
+            Some(x) => x.lock(),
+            _ => {
+                frame_table.used_pages.push_back(index);
+                continue;
+            }
+        };
+
+        let pte = pt.get_pte_mut(va).unwrap();
+        if pte.is_accessed() {
+            pte.set_unaccessed();
+            frame_table.used_pages.push_back(index);
+            continue;
+        }
+
+        if !pte.is_valid() {
+            panic!("page not present when swapping out");
+        }
     }
 }

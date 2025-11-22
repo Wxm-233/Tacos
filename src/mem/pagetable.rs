@@ -87,6 +87,14 @@ impl PageTable {
         })
     }
 
+    pub fn get_pte_mut(&mut self, va: usize) -> Option<&mut Entry> {
+        self.walk(Self::px(2, va)).and_then(|l1_table| {
+            l1_table
+                .walk(Self::px(1, va))
+                .map(|l0_table| l0_table.entries.get_mut(Self::px(0, va)).unwrap())
+        })
+    }
+
     /// Free all memory used by this pagetable back to where they were allocated.
     pub unsafe fn destroy(&mut self) {
         unsafe fn destroy_imp(pgt: &mut PageTable, level: usize) {
