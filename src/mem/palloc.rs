@@ -232,14 +232,46 @@ fn swap_page() -> bool {
             .enumerate()
             .find(|(_, x) | x.contains(va)) {
 
-            let mapinfo = mapping_table.list.get_mut(pos).unwrap();
+            let sptinfo = spt.list.get(pos).unwrap();
             if pte.is_dirty() {
-                let l = (va - mapinfo.va).floor();
-                let size = (mapinfo.memsize - l).min(PG_SIZE);
+                let l = (va - sptinfo.va).floor();
+                let size = (sptinfo.memsize - l).min(PG_SIZE);
                 let buf = unsafe {
                     (pte.pa().into_va() as *const [u8; PG_SIZE])
                         .as_ref()
                         .unwrap()
+                };
+                mapping_table.release();
+                pt.release();
+                spt.release();
+                Swap::write_page(sptinfo.offset + l, &buf[..size]);
+                mapping_table.acquire();
+                pt.acquire();
+                spt.acquire();
+            }
+            unsafe {
+                UserPool::dealloc_pages(pte.pa().into_va() as *mut _, 1);
+            }
+            pte.set_invalid();
+        } else if let Some((pos, _)) = mapping_table
+            .list
+            .iter()
+            .enumerate()
+            .find(|(_, x)| x.contains(va)) {
+            let mapinfo = mapping_table.list.get_mut(pos).unwrap();
+            if pte.is_dirty() {
+                let l = (va - mapinfo.va).floor();
+                mapinfo
+                    .file
+                    .as_mut()
+                    .unwrap()
+                    .seek(SeekFrom::Start(mapinfo.offset + l))
+                    .unwrap();
+                let size = (mapinfo.memsize.max(l) - l).min(PG_SIZE);
+                let mut buf = unsafe {
+                    (pte.pa().into_va() as *const [u8; PG_SIZE])
+                    .as_ref()
+                    .unwrap()
                 };
                 if mapinfo.mapid == -1
                     || mapinfo

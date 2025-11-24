@@ -24,13 +24,14 @@ mod entry;
 use core::ptr;
 use core::{arch::asm, mem::transmute};
 
+use crate::mem::palloc::frame::GlobalFrameTable;
 use crate::mem::{
     layout::{MMIO_BASE, PLIC_BASE, VM_BASE},
     malloc::{kalloc, kfree},
     palloc::UserPool,
     utils::{PageAlign, PhysAddr, PG_SIZE},
 };
-use crate::mem::{KERN_BASE, PG_SHIFT, VM_OFFSET};
+use crate::mem::{KERN_BASE, PG_SHIFT, VM_OFFSET, in_kernel_space};
 use crate::sync::OnceCell;
 
 pub use self::entry::*;
@@ -64,6 +65,28 @@ impl PageTable {
 
     /// Maps `pa` to `va` and allocates page table when necessary.
     pub fn map(&mut self, pa: PhysAddr, va: usize, size: usize, flag: PTEFlags) {
+        assert!(pa.is_aligned() && va.is_aligned(), "address misaligns");
+
+        let pa_end = pa.value() + size;
+        let (mut pa, mut va) = (pa.value(), va);
+
+        while pa < pa_end {
+            let mut l1_table = self.walk_or_create(Self::px(2, va), flag.contains(PTEFlags::G));
+            let l0_table = l1_table.walk_or_create(Self::px(1, va), flag.contains(PTEFlags::G));
+            l0_table.entries[Self::px(0, va)] = Entry::new(PhysAddr::from_pa(pa), flag);
+
+            if pa >= GlobalFrameTable::start()
+                && pa < GlobalFrameTable::end()
+                && !in_kernel_space(va) {
+                GlobalFrameTable::map(pa, va, flag);
+            }
+            
+            pa += PG_SIZE;
+            va += PG_SIZE;
+        }
+    }
+
+    pub fn map_no_update(&mut self, pa: PhysAddr, va: usize, size: usize, flag: PTEFlags) {
         assert!(pa.is_aligned() && va.is_aligned(), "address misaligns");
 
         let pa_end = pa.value() + size;
