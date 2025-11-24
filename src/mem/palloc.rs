@@ -194,7 +194,7 @@ impl UserPool {
 fn swap_page() -> bool {
     let mut frame_table = GlobalFrameTable::instance().lock();
     let size = frame_table.used_pages.len();
-    for _ in 0..size*2 {
+    for __ in 0..size*2 {
         let index = frame_table.used_pages.pop_front().unwrap();
         let entry = frame_table.entries.get_mut(index).unwrap();
         let thread = entry.as_ref().unwrap().thread.upgrade();
@@ -235,6 +235,7 @@ fn swap_page() -> bool {
             let sptinfo = spt.list.get(pos).unwrap();
             if pte.is_dirty() {
                 let l = (va - sptinfo.va).floor();
+                assert!((va - sptinfo.va).floor() == 0);
                 let size = (sptinfo.memsize - l).min(PG_SIZE);
                 let buf = unsafe {
                     (pte.pa().into_va() as *const [u8; PG_SIZE])
@@ -268,10 +269,10 @@ fn swap_page() -> bool {
                     .seek(SeekFrom::Start(mapinfo.offset + l))
                     .unwrap();
                 let size = (mapinfo.memsize.max(l) - l).min(PG_SIZE);
-                let mut buf = unsafe {
+                let buf = unsafe {
                     (pte.pa().into_va() as *const [u8; PG_SIZE])
-                    .as_ref()
-                    .unwrap()
+                        .as_ref()
+                        .unwrap()
                 };
                 if mapinfo.mapid == -1
                     || mapinfo

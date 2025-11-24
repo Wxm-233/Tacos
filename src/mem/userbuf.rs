@@ -30,7 +30,7 @@ pub fn read_user_usize(user_src: *const usize) -> Result<usize> {
     let ptr = user_src as usize;
     let mut result: usize = 0;
     for i in 0..core::mem::size_of::<usize>() {
-        result |= ((read_user_byte((ptr + i) as *const u8)? as usize) << (i * 8));
+        result |= ((read_user_byte((ptr + i) as *const u8)?) as usize) << (i * 8);
     }
     Ok(result)
 }

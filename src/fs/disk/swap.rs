@@ -50,8 +50,7 @@ impl Swap {
     }
 
     pub fn push_page(page: usize) {
-        let mut vec = SWAPFILE_VEC.lock();
-        vec.push(page);
+        SWAPFILE_VEC.lock().push(page);
     }
 
     pub fn read_page(pos: usize, buf: &mut [u8]) -> usize {
@@ -59,7 +58,7 @@ impl Swap {
         if (pos >= file.len().unwrap()) {
             panic!("read invalid swap page");
         }
-        file.seek(SeekFrom::Start(pos));
+        let _ = file.seek(SeekFrom::Start(pos));
         file.read(buf).unwrap()
     }
 
@@ -68,7 +67,7 @@ impl Swap {
         if (pos >= file.len().unwrap()) {
             panic!("write invalid swap page");
         }
-        file.seek(SeekFrom::Start(pos));
-        file.write(buf);
+        let _ = file.seek(SeekFrom::Start(pos));
+        assert!(file.write(buf).unwrap() == buf.len());
     }
 }

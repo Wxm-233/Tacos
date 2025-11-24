@@ -202,15 +202,7 @@ pub fn syscall_handler(id: usize, args: [usize; 3]) -> isize {
                 return -1;
             }
             let ptr = args[1] as usize;
-            let raw_ptr = ptr as *mut u8;
             let size = args[2] as usize;
-
-            for i in 0..size {
-                if !valid_ptr(ptr + i) {
-                    return -1;
-                }
-            }
-            let buf: &mut [u8] = unsafe { core::slice::from_raw_parts_mut(raw_ptr, size) };
 
             if fd == 0 {
                 for i in 0..size {

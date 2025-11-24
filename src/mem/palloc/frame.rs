@@ -59,7 +59,8 @@ impl GlobalFrameTable {
         let index = (pa - frame_table.start) >> PG_SHIFT;
         match frame_table.entries.get(index).unwrap() {
             Some(x) => {
-                x.thread.upgrade();
+                kprintln!("{:?}", x.thread.upgrade());
+                assert!(x.thread.upgrade().is_none());
             }
             _ => (),
         };
