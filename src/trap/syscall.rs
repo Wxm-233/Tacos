@@ -433,7 +433,7 @@ pub fn syscall_handler(id: usize, args: [usize; 3]) -> isize {
                 .iter_mut()
                 .find(|mapinfo| mapinfo.mapid == mapid) {
                     Some(mapinfo) => mapinfo,
-                    _ => return -1,
+                    _ => return 0,
                 };
             for i in (0..mapinfo.memsize).step_by(PG_SIZE) {
                 if let Some(entry) = pt.get_pte_mut(mapinfo.va + i) {
@@ -452,7 +452,7 @@ pub fn syscall_handler(id: usize, args: [usize; 3]) -> isize {
                         mapinfo.file.as_mut().unwrap().write(&buf[..size]).unwrap();
                     }
                     unsafe {
-                        UserPool::dealloc_pages((entry.pa().into_va()) as *mut u8, 1);
+                        UserPool::dealloc_pages((entry.pa().into_va()) as *mut _, 1);
                     }
                     entry.set_invalid();
                 }
