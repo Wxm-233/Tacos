@@ -1,3 +1,5 @@
+use core::iter::Map;
+
 use alloc::vec;
 use elf_rs::{Elf, ElfFile, ProgramHeaderEntry, ProgramHeaderFlags, ProgramType};
 
@@ -5,8 +7,10 @@ use crate::fs::File;
 use crate::io::prelude::*;
 use crate::mem::pagetable::{PTEFlags, PageTable};
 use crate::mem::palloc::UserPool;
-use crate::mem::{div_round_up, PageAlign, PhysAddr, PG_MASK, PG_SIZE};
+use crate::mem::{PG_MASK, PG_SIZE, PageAlign, PhysAddr, div_round_up, mappingtable};
 use crate::{OsError, Result};
+
+use crate::mem::mappingtable::{MapInfo, MappingTable};
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ExecInfo {
@@ -26,20 +30,20 @@ pub(super) struct ExecInfo {
 pub(super) fn load_executable(
     file: &mut File,
     pagetable: &mut PageTable,
-) -> Result<(ExecInfo, usize)> {
-    let exec_info = load_elf(file, pagetable)?;
+) -> Result<(ExecInfo, MappingTable)> {
+    let (exec_info, mappingtable) = load_elf(file)?;
 
     // Initialize user stack.
-    let stack_va = init_user_stack(pagetable, exec_info.init_sp);
+    init_user_stack(pagetable, exec_info.init_sp);
 
     // Forbid modifying executable file when running
     file.deny_write();
 
-    Ok((exec_info, stack_va))
+    Ok((exec_info, mappingtable))
 }
 
 /// Parses the specified executable file and loads segments
-fn load_elf(file: &mut File, pagetable: &mut PageTable) -> Result<ExecInfo> {
+fn load_elf(file: &mut File) -> Result<(ExecInfo, MappingTable)> {
     // Ensure cursor is at the beginning
     file.rewind()?;
 
@@ -52,25 +56,29 @@ fn load_elf(file: &mut File, pagetable: &mut PageTable) -> Result<ExecInfo> {
         Ok(Elf::Elf32(_)) | Err(_) => return Err(OsError::UnknownFormat),
     };
 
+    let mut mappingtable: MappingTable = MappingTable::new();
+
     // load each loadable segment into memory
     elf.program_header_iter()
         .filter(|p| p.ph_type() == ProgramType::LOAD)
-        .for_each(|p| load_segment(&buf, &p, pagetable));
+        .for_each(|p| load_segment(file, &p, &mut mappingtable));
 
-    Ok(ExecInfo {
-        entry_point: elf.elf_header().entry_point() as _,
-        init_sp: 0x80500000,
-    })
+    Ok((ExecInfo {
+            entry_point: elf.elf_header().entry_point() as _,
+            init_sp: 0x80500000,
+        },
+        mappingtable,
+    ))
 }
 
 /// Loads one segment and installs pagetable mappings
-fn load_segment(filebuf: &[u8], phdr: &ProgramHeaderEntry, pagetable: &mut PageTable) {
+fn load_segment(file: &mut File, phdr: &ProgramHeaderEntry, mappingtable: &mut MappingTable) {
     assert_eq!(phdr.ph_type(), ProgramType::LOAD);
 
     // Meaningful contents of this segment starts from `fileoff`.
     let fileoff = phdr.offset() as usize;
     // But we will read and install from `read_pos`.
-    let mut readpos = fileoff & !PG_MASK;
+    let readpos = fileoff & !PG_MASK;
 
     // Install flags.
     let mut leaf_flag = PTEFlags::V | PTEFlags::U | PTEFlags::R;
@@ -86,34 +94,49 @@ fn load_segment(filebuf: &[u8], phdr: &ProgramHeaderEntry, pagetable: &mut PageT
     let pageoff = (phdr.vaddr() as usize) & PG_MASK;
     assert_eq!(fileoff & PG_MASK, pageoff);
 
+    let readbytes = phdr.filesz() as usize + pageoff;
+    mappingtable
+        .list
+        .push(
+            MapInfo::new(
+                -1,
+                Some(file.clone()),
+                readpos,
+                ubase,
+                readbytes,
+                phdr.memsz() as usize + pageoff,
+                leaf_flag,
+            )
+        );
+
     // How many pages need to be allocated
-    let pages = div_round_up(pageoff + phdr.memsz() as usize, PG_SIZE);
-    let mut readbytes = phdr.filesz() as usize + pageoff;
+    // let pages = div_round_up(pageoff + phdr.memsz() as usize, PG_SIZE);
+    // let mut readbytes = phdr.filesz() as usize + pageoff;
 
     // Allocate & map pages
-    for p in 0..pages {
-        let buf = unsafe { UserPool::alloc_pages(1) };
-        let page = unsafe { (buf as *mut [u8; PG_SIZE]).as_mut().unwrap() };
+    // for p in 0..pages {
+    //     let buf = unsafe { UserPool::alloc_pages(1) };
+    //     let page = unsafe { (buf as *mut [u8; PG_SIZE]).as_mut().unwrap() };
 
-        // Read `readsz` bytes, fill remaining bytes with 0.
-        let readsz = readbytes.min(PG_SIZE);
-        page[..readsz].copy_from_slice(&filebuf[readpos..readpos + readsz]);
-        page[readsz..].fill(0);
+    //     // Read `readsz` bytes, fill remaining bytes with 0.
+    //     let readsz = readbytes.min(PG_SIZE);
+    //     page[..readsz].copy_from_slice(&filebuf[readpos..readpos + readsz]);
+    //     page[readsz..].fill(0);
 
-        // The installed page will be freed when pagetable drops, which happens
-        // when user process exits. No manual resource collect is required.
-        let uaddr = ubase + p * PG_SIZE;
-        pagetable.map(buf.into(), uaddr, 1, leaf_flag);
+    //     // The installed page will be freed when pagetable drops, which happens
+    //     // when user process exits. No manual resource collect is required.
+    //     let uaddr = ubase + p * PG_SIZE;
+    //     pagetable.map(buf.into(), uaddr, 1, leaf_flag);
 
-        readbytes -= readsz;
-        readpos += readsz;
-    }
+    //     readbytes -= readsz;
+    //     readpos += readsz;
+    // }
 
-    assert_eq!(readbytes, 0);
+    // assert_eq!(readbytes, 0);
 }
 
 /// Initializes the user stack.
-fn init_user_stack(pagetable: &mut PageTable, init_sp: usize) -> usize {
+fn init_user_stack(pagetable: &mut PageTable, init_sp: usize) {
     assert!(init_sp % PG_SIZE == 0, "initial sp address misaligns");
 
     // Allocate a page from UserPool as user stack.
@@ -125,7 +148,7 @@ fn init_user_stack(pagetable: &mut PageTable, init_sp: usize) -> usize {
 
     // Install mapping
     let flags = PTEFlags::V | PTEFlags::R | PTEFlags::W | PTEFlags::U;
-    pagetable.map(stack_pa, stack_page_begin, PG_SIZE, flags);
+    pagetable.map_no_update(stack_pa, stack_page_begin, PG_SIZE, flags);
 
     #[cfg(feature = "debug")]
     kprintln!(
@@ -133,6 +156,4 @@ fn init_user_stack(pagetable: &mut PageTable, init_sp: usize) -> usize {
         stack_va,
         stack_page_begin
     );
-
-    stack_va as usize
 }

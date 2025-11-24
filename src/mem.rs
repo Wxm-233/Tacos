@@ -39,6 +39,7 @@ pub fn init(ram_base: usize, ram_tail: usize, pm_len: usize) {
     unsafe {
         palloc::Palloc::init(ram_base, palloc_tail);
         palloc::UserPool::init(palloc_tail, ram_tail);
+        palloc::frame::GlobalFrameTable::init(palloc_tail, ram_tail);
         KernelPgTable::init(pm_len);
     }
 }

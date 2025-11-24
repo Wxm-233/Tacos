@@ -326,8 +326,12 @@ arch::global_asm! {r#"
     # save sstatus & sepc
         csrr t0, sstatus
         csrr t1, sepc
+
+        csrr t2, sscratch
+
         sd   t0, 32*8(sp)
         sd   t1, 33*8(sp)
+        sd   t2,  2*8(sp)
 
         mv   a0, sp
         call trap_handler

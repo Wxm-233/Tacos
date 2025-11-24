@@ -49,7 +49,7 @@ impl FrameTable {
 pub struct GlobalFrameTable(Lazy<Mutex<FrameTable, Primitive>>);
 
 impl GlobalFrameTable {
-    pub fn init(&self, start: usize, end: usize) {
+    pub fn init(start: usize, end: usize) {
         Self::instance().lock().set_range(start, end);
     }
 

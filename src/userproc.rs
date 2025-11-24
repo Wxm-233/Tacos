@@ -13,8 +13,9 @@ use core::panic;
 use riscv::register::sstatus;
 
 use crate::fs::File;
-use crate::mem::{PageAlign, PageTable, PhysAddr};
+use crate::mem::{PageAlign, PageTable, PhysAddr, PG_SIZE};
 use crate::mem::pagetable::KernelPgTable;
+use crate::sbi::interrupt;
 use crate::{childinfo, sbi};
 use crate::sync::Semaphore;
 use crate::thread::{self, Manager, manager};
@@ -26,7 +27,11 @@ use ptr::copy_nonoverlapping;
 use alloc::sync::Arc;
 use crate::mem::Translate;
 use crate::childinfo::ChildInfo;
-use crate::thread::{schedule};
+use crate::thread::{current, schedule};
+
+use crate::fs::disk::Swap;
+use crate::io::{Seek, SeekFrom, Write};
+use crate::mem::palloc::UserPool;
 
 pub struct UserProc {
     #[allow(dead_code)]
@@ -58,13 +63,19 @@ pub fn execute(mut file: File, argv: Vec<String>) -> isize {
     // switch pagetables.
     let mut pt = KernelPgTable::clone();
 
-    let (exec_info, stack_va) = match load::load_executable(&mut file, &mut pt) {
+    let (exec_info, mappingtable) = match load::load_executable(&mut file, &mut pt) {
         Ok(x) => x,
         Err(_) => unsafe {
             pt.destroy();
             return -1;
         },
     };
+
+    let stack_va = pt
+        .get_pte(PageAlign::floor(exec_info.init_sp - 1))
+        .unwrap()
+        .pa()
+        .into_va();
 
     // Initialize frame, pass argument to user.
     let mut frame = unsafe { MaybeUninit::<Frame>::zeroed().assume_init() };
@@ -130,6 +141,7 @@ pub fn execute(mut file: File, argv: Vec<String>) -> isize {
         .pagetable(pt)
         .userproc(userproc)
         .parent(thread::current())
+        .set_mapping_table(mappingtable)
         .spawn();
 
     let childinfo = child.init_child_info();
@@ -142,18 +154,16 @@ pub fn execute(mut file: File, argv: Vec<String>) -> isize {
 /// Panic if the current thread doesn't own a user process.
 pub fn exit(value: isize) -> ! {
     // TODO: Lab2.
+    // Well, Lab 3 also modify here.
     let old = sbi::interrupt::set(false);
-    // let current = thread::current();
-    // if current.userproc().is_none() {
-    //     panic!("exit() called by a non-user thread");
-    // }
+    let t = thread::current();
 
-    thread::current().parent.lock().as_ref().map(|parent| {
+    t.parent.lock().as_ref().map(|parent| {
         parent
             .children
             .lock()
             .iter_mut()
-            .find(|child| child.tid == thread::current().id())
+            .find(|child| child.tid == t.id())
             .map(|child_info| {
                 child_info.ptr = None;
                 child_info.exit_code = Some(value);
@@ -171,18 +181,49 @@ pub fn exit(value: isize) -> ! {
         })
     });
 
-    // let current_pt = unsafe { PageTable::effective_pagetable() };
+     let pt = unsafe { PageTable::effective_pagetable() };
+     for mapinfo in t.mapping_table.lock().list.iter_mut() {
+        if mapinfo.mapid == -1 {
+            continue;
+        }
+        for i in (0..mapinfo.memsize).step_by(PG_SIZE) {
+            if let Some(entry) = pt.get_pte_mut(mapinfo.va + i) {
+                if entry.is_valid() && entry.is_dirty() {
+                    mapinfo
+                        .file
+                        .as_mut()
+                        .unwrap()
+                        .seek(SeekFrom::Start(mapinfo.offset + i))
+                        .unwrap();
+                    let size = (mapinfo.memsize - i).min(PG_SIZE);
+                    let buf = unsafe {
+                        ((mapinfo.va + i) as *const [u8; PG_SIZE]).as_ref().unwrap()
+                    };
+                    mapinfo.file.as_mut().unwrap().write(&buf[..size]);
+                }
+                unsafe {
+                    UserPool::dealloc_pages(entry.pa().into_va() as *mut _, 1);
+                }
+                entry.set_invalid();
+            }
+        }
+        pt.activate();
+    }
     
-    {
-        let current = Manager::get().current.lock();
-        
-        #[cfg(feature = "debug")]
-        kprintln!("Exit: {:?}", *current);
-        
-        current.set_status(thread::imp::Status::Dying);
-    } // replace exit() so we can set interrupt here
-    sbi::interrupt::set(old);
+    for sptinfo in t
+        .supplementary_pagetable
+        .lock()
+        .list
+        .iter() {
+        Swap::push_page(sptinfo.offset);
+    }
 
+    {
+        let t = thread::Manager::get().current.lock();
+        t.set_status(thread::imp::Status::Dying);
+    }
+    
+    sbi::interrupt::set(old);
     schedule();
 
     unreachable!("An exited thread shouldn't be scheduled again");
@@ -196,16 +237,18 @@ pub fn exit(value: isize) -> ! {
 pub fn wait(tid: isize) -> Option<isize> {
     // TODO: Lab2.
     // let old = sbi::interrupt::set(false);
-    let current = thread::current();
+    {
+            let current = thread::current();
 
-    // for childinfo in current.children.lock().iter_mut() {
-    //     if childinfo.tid == tid {
-    //         if let Some(ret) = childinfo.exit_code {
-    //             childinfo.exit_code = Some(-1);
-    //             return Some(ret);
-    //         } 
-    //     }
-    // }
+        for childinfo in current.children.lock().iter_mut() {
+            if childinfo.tid == tid {
+                if let Some(ret) = childinfo.exit_code {
+                    childinfo.exit_code = Some(-1);
+                    return Some(ret);
+                } 
+            }
+        }
+    }
 
     let sema = thread::current()
         .children
@@ -230,7 +273,7 @@ pub fn wait(tid: isize) -> Option<isize> {
         .take()
         .map(|child_info| child_info.exit_code.unwrap());
 
-    current.children.lock().retain(|child_info| child_info.tid != tid);
+    thread::current().children.lock().retain(|child_info| child_info.tid != tid);
 
     // sbi::interrupt::set(old);
 

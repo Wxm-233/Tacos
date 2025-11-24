@@ -13,8 +13,9 @@ use alloc::vec::Vec;
 use crate::alloc::vec;
 use crate::fs::File;
 use crate::mem::palloc::UserPool;
-use crate::mem::userbuf;
+use crate::mem::userbuf::{self, read_user_byte, read_user_usize, write_user_byte, write_user_usize};
 use crate::mem::{PTEFlags, PageTable, PG_SHIFT, PG_SIZE};
+use crate::sbi::console;
 use crate::thread::current;
 
 use crate::{
@@ -66,10 +67,18 @@ fn ptr2string(mut ptr: usize) -> Option<String> {
 
     // no! why can't I break a value from a while-loop.
     loop {
-        if !valid_ptr(ptr) {
-            break None;
-        }
-        let c = unsafe { (ptr as *mut u8).read() };
+        // if !valid_ptr(ptr) {
+        //     break None;
+        // }
+        // read_user_byte will check the ptr so above could be removed
+
+        // let c = unsafe { (ptr as *mut u8).read() };
+
+        let c = match read_user_byte(ptr as *const u8) {
+            Ok(c) => c,
+            _ => break None,
+        };
+
         if c == b'\0' {
             break Some(str);
         }
@@ -88,36 +97,55 @@ pub fn syscall_handler(id: usize, args: [usize; 3]) -> isize {
             userproc::exit(args[0] as isize);
         }
         SYS_EXEC => {
-            let name = match ptr2string(args[0]) {
-                Some(str) => str,
-                _ => return -1,
-            };
-
-            let file = match DISKFS.open(name.as_str().into()) {
-                Ok(f) => f,
-                _ => return -1,
-            };
-
-            let mut argv = Vec::new();
-            let mut ptr = args[1];
-            loop {
-                if !valid_ptr(ptr) {
-                    break -1;
-                }
-                let val = unsafe {
-                    (ptr as *const usize).read()
-                };
-                if val == 0 {
-                    break execute(file, argv);
-                }
-                let str = match ptr2string(val) {
+            let tid = {
+                let name = match ptr2string(args[0]) {
                     Some(str) => str,
-                    _ => break -1,
+                    _ => return -1,
                 };
-                argv.push(str);
 
-                ptr += core::mem::size_of::<usize>();
+                let file = match DISKFS.open(name.as_str().into()) {
+                    Ok(f) => f,
+                    _ => return -1,
+                };
+
+                let mut argv = Vec::new();
+                let mut ptr = args[1];
+                loop {
+                    // if !valid_ptr(ptr) {
+                    //     break -1;
+                    // }
+                    let val = match read_user_usize(ptr as *const usize) {
+                        Ok(val) => val,
+                        _ => return -1,
+                    };
+                    if val == 0 {
+                        break execute(file, argv);
+                    }
+                    let str = match ptr2string(val) {
+                        Some(str) => str,
+                        _ => break -1,
+                    };
+                    argv.push(str);
+
+                    ptr += core::mem::size_of::<usize>();
+                }
+            };
+            {
+                let sema = thread::current()
+                    .children
+                    .lock()
+                    .iter_mut()
+                    .find(|x| x.tid == tid)
+                    .map(|child_info| {
+                        child_info.is_waiting = true;
+                        child_info.wait_sema.clone()
+                    });
+
+                sema.map(|sema| {
+                    sema.down();
+                });
             }
+            tid
         }
         SYS_WAIT => {
             match userproc::wait(args[0] as isize) {
@@ -186,11 +214,15 @@ pub fn syscall_handler(id: usize, args: [usize; 3]) -> isize {
 
             if fd == 0 {
                 for i in 0..size {
-                    buf[i] = console_getchar() as u8;
+                    if let Err(_) = write_user_byte((ptr + i) as *const u8, console_getchar() as u8) {
+                        return -1;
+                    }
                 }
                 return size as isize;
             }
-            // why will a borrow problem happen here when I write a long statement??
+
+            let mut buf = vec![0u8; size];
+            
             let current = thread::current();
             let mut fdlist = current.fdlist.lock();
             let file = match fdlist.get_by_fd(fd) {
@@ -198,38 +230,63 @@ pub fn syscall_handler(id: usize, args: [usize; 3]) -> isize {
                 _ => return -1,
             };
 
-            match file.read(buf) {
-                Ok(ret) => ret as isize,
-                _ => -1,
+            // match file.read(buf) {
+            //     Ok(ret) => ret as isize,
+            //     _ => -1,
+            // }
+
+            let pos = *file.pos().unwrap();
+            let retval = match file.read(&mut buf[..]) {
+                Ok(retval) => retval,
+                _ => {
+                    file.seek(SeekFrom::Start(pos));
+                    return -1;
+                }
+            };
+            for i in 0..retval {
+                if let Err(_) = write_user_byte((ptr + i) as *const u8, buf[i]) {
+                    file.seek(SeekFrom::Start(pos));
+                    return -1;
+                }
             }
+            retval as isize
         }
         SYS_WRITE => {
             let fd = args[0] as isize;
             let ptr = args[1];
-            let raw_ptr = ptr as *mut u8;
             let size = args[2];
             if fd == 0 {
                 return -1;
             }
-            for i in 0..size {
-                if !valid_ptr(ptr + i) {
-                    return -1;
-                }
-            }
-            let buf: &[u8] = unsafe { core::slice::from_raw_parts(raw_ptr, size) };
+            // for i in 0..size {
+            //     if !valid_ptr(ptr + i) {
+            //         return -1;
+            //     }
+            // }
+            // let buf: &[u8] = unsafe { core::slice::from_raw_parts(raw_ptr, size) };
             if fd == 1 || fd == 2 {
                 for i in 0..size {
-                    kprint!("{}", buf[i] as char);
+                    match read_user_byte((ptr + i) as *const u8) {
+                        Ok(c) => kprint!("{}", c as char),
+                        _ => return -1,
+                    }
                 }
                 size as isize
             } else {
+                let mut buf = vec![0u8; size];
+                for i in 0..size {
+                    buf[i] = match read_user_byte((ptr + i) as *const u8) {
+                        Ok(c) => c,
+                        _ => return -1,
+                    }
+                }
                 let current = thread::current();
                 let mut fdlist = current.fdlist.lock();
                 let file = match fdlist.get_by_fd(fd) {
                     Some(fd_info) if (fd_info.flag & (O_WRONLY | O_RDWR)) != 0 => &mut fd_info.file,
                     _ => return -1,
                 };
-                match file.write(buf) {
+                match file.write(&mut buf[..]) {
                     Ok(x) => x as isize,
                     _ => -1,
                 }
@@ -283,9 +340,11 @@ pub fn syscall_handler(id: usize, args: [usize; 3]) -> isize {
             let size = file.len().unwrap();
             let ptr = args[1];
             if valid_ptr(ptr) {
-                unsafe {
-                    (ptr as *mut usize).write(file.inum());
-                    ((ptr + core::mem::size_of::<usize>()) as *mut usize).write(size); 
+                if let Err(_) = write_user_usize(ptr as *const usize, file.inum()) {
+                    return -1;
+                }
+                if let Err(_) = write_user_usize((ptr + core::mem::size_of::<usize>()) as *const usize, size) {
+                    return -1;
                 }
             }
             0
