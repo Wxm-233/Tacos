@@ -59,7 +59,7 @@ impl Swap {
         if (pos >= file.len().unwrap()) {
             panic!("read invalid swap page");
         }
-        file.seek(SeekFrom::Start(pos as usize)).unwrap();
+        file.seek(SeekFrom::Start(pos));
         file.read(buf).unwrap()
     }
 
@@ -68,7 +68,7 @@ impl Swap {
         if (pos >= file.len().unwrap()) {
             panic!("write invalid swap page");
         }
-        file.seek(SeekFrom::Start(pos as usize)).unwrap();
-        file.write(buf).unwrap();
+        file.seek(SeekFrom::Start(pos));
+        file.write(buf);
     }
 }

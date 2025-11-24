@@ -57,6 +57,12 @@ impl GlobalFrameTable {
         let mut frame_table = Self::instance().lock();
 
         let index = (pa - frame_table.start) >> PG_SHIFT;
+        match frame_table.entries.get(index).unwrap() {
+            Some(x) => {
+                x.thread.upgrade();
+            }
+            _ => (),
+        };
         frame_table.used_pages.push_back(index);
         *frame_table.entries.get_mut(index).unwrap() = 
             Some(FrameInfo::new(Arc::downgrade(&current()), va, flag));
@@ -66,7 +72,6 @@ impl GlobalFrameTable {
         let mut frame_table = Self::instance().lock();
 
         let index = (pa - frame_table.start) >> PG_SHIFT;
-        frame_table.used_pages.retain(|&x| x != index);
         *frame_table.entries.get_mut(index).unwrap() = None;
     }
 
