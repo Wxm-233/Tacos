@@ -2,7 +2,8 @@
 
 use core::cmp::min;
 
-use crate::mem::utils::*;
+use crate::mem::mappingtable::{MapInfo, MappingTable};
+use crate::mem::{pagetable, utils::*};
 use crate::sync::{Intr, Lazy, Mutex};
 
 use core::array;
@@ -224,8 +225,8 @@ fn swap_page() -> bool {
         }
 
         let mut mapping_table = thread.mapping_table.lock();
-        let mut ept = thread.extra_pagetable.lock();
-        if let Some((pos, _)) = ept
+        let mut spt = thread.supplementary_pagetable.lock();
+        if let Some((pos, _)) = spt
             .list
             .iter()
             .enumerate()
@@ -247,10 +248,38 @@ fn swap_page() -> bool {
                         .unwrap()
                         .write(&buf[..size])
                         .is_err() {
-                    
+                    let swap_pos = Swap::new_page();
+                    let eptinfo = MapInfo::new(
+                        -1,
+                        None,
+                        swap_pos,
+                        va.floor(),
+                        PG_SIZE,
+                        PG_SIZE,
+                        mapinfo.flags | PTEFlags::W | PTEFlags::R,
+                    );
+
+                    mapping_table.release();
+                    pt.release();
+                    spt.release();
+                    Swap::write_page(swap_pos, &buf[..size]);
+                    mapping_table.acquire();
+                    pt.acquire();
+                    spt.acquire();
+
+                    spt.list.push(eptinfo);
                 }
             }
+            unsafe {
+                UserPool::dealloc_pages(pte.pa().into_va() as *mut _, 1);
+            }
+            pte.set_invalid();
+        } else {
+            frame_table.used_pages.push_back(index);
+            continue;
         }
+        *entry = None;
+        return true;
     }
-    true
+    unreachable!("memory exhausted!");
 }

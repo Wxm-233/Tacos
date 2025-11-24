@@ -45,7 +45,7 @@ pub struct Thread {
     pub fdlist: Mutex<FDList>,
 
     pub mapping_table: Mutex<MappingTable>,
-    pub extra_pagetable: Mutex<MappingTable>,
+    pub supplementary_pagetable: Mutex<MappingTable>,
 }
 
 impl Thread {
@@ -78,7 +78,7 @@ impl Thread {
             fdlist: Mutex::new(FDList::new()),
 
             mapping_table: Mutex::new(mappingtable.unwrap_or(MappingTable::new())),
-            extra_pagetable: Mutex::new(MappingTable::new()),
+            supplementary_pagetable: Mutex::new(MappingTable::new()),
         }
     }
 

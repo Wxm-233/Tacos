@@ -38,10 +38,10 @@ pub fn stack_growth_handler(frame: &Frame, addr: usize, user_mode: bool) -> bool
     true
 }
 
-pub fn ept_handler(frame: &Frame, va: usize) -> bool {
+pub fn spt_handler(frame: &Frame, va: usize) -> bool {
     let current = current();
-    let ept = current.extra_pagetable.lock();
-    if let Some(mapinfo) = ept.list.iter().find(|m| m.contains(va)) {
+    let spt = current.supplementary_pagetable.lock();
+    if let Some(mapinfo) = spt.list.iter().find(|m| m.contains(va)) {
         let pa = if let Some(file) = &mapinfo.file {
             let mut buf = vec![0u8; mapinfo.memsize];
             let phys_addr = unsafe { UserPool::alloc_pages(mapinfo.memsize >> PG_SHIFT) };
@@ -145,7 +145,7 @@ pub fn handler(frame: &mut Frame, fault: Exception, addr: usize) {
         SPP::Supervisor => {
             let handled = 
                 !present && (
-                ept_handler(frame, addr)
+                spt_handler(frame, addr)
                 || stack_growth_handler(frame, addr, false)
                 || mmap_handler(frame, addr));
             if handled {
@@ -167,7 +167,7 @@ pub fn handler(frame: &mut Frame, fault: Exception, addr: usize) {
         SPP::User => {
             let handled = 
                 !present && (
-                ept_handler(frame, addr)
+                spt_handler(frame, addr)
                 || stack_growth_handler(frame, addr, true)
                 || mmap_handler(frame, addr));
             if handled {
