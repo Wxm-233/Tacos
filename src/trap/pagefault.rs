@@ -41,34 +41,24 @@ pub fn stack_growth_handler(frame: &Frame, addr: usize, user_mode: bool) -> bool
 pub fn spt_handler(frame: &Frame, va: usize) -> bool {
     let current = current();
     let spt = current.supplementary_pagetable.lock();
-    if let Some(mapinfo) = spt.list.iter().find(|m| m.contains(va)) {
-        let pa = if let Some(file) = &mapinfo.file {
-            let mut buf = vec![0u8; mapinfo.memsize];
-            let phys_addr = unsafe { UserPool::alloc_pages(mapinfo.memsize >> PG_SHIFT) };
-            unsafe {
-                core::ptr::copy_nonoverlapping(
-                    buf.as_ptr(),
-                    phys_addr as *mut u8,
-                    mapinfo.memsize,
-                );
-            }
-            PhysAddr::from(phys_addr)
-        } else {
-            let phys_addr = unsafe { UserPool::alloc_pages(mapinfo.memsize >> PG_SHIFT) };
-            unsafe {
-                core::ptr::write_bytes(phys_addr as *mut u8, 0, mapinfo.memsize);
-            }
-            PhysAddr::from(phys_addr)
-        };
+    if let Some(mapinfo) = spt.list.iter().find(|m| m.contains(va)).map(|m| m.clone()) {
+        let pos = (va - mapinfo.va).floor();
+        let mut pt = unsafe { PageTable::effective_pagetable() };
+        spt.release();
+        let start_va = unsafe { UserPool::alloc_pages(1) as usize };
+        let start_pa = PhysAddr::from(start_va);
+        let buf = unsafe { (start_va as *mut [u8; PG_SIZE]).as_mut().unwrap() };
+        let size = Swap::read_page(pos + mapinfo.offset, &mut buf[..PG_SIZE]);
+        buf[size..].fill(0);
+        spt.acquire();
 
-        let mut current_pt = unsafe { PageTable::effective_pagetable() };
-        current_pt.map(
-            pa,
-            PageAlign::floor(va),
-            mapinfo.memsize,
-            mapinfo.flags,
+        pt.map(
+            start_pa,
+            va.floor(),
+            PG_SIZE,
+            mapinfo.flags | PTEFlags::V | PTEFlags::A,
         );
-        current_pt.activate();
+        pt.activate();
         true
     } else {
         false

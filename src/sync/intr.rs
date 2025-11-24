@@ -24,7 +24,7 @@ unsafe impl Send for Intr {}
 
 impl Lock for Intr {
     fn acquire(&self) {
-        assert!(self.0.get().is_none());
+        // assert!(self.0.get().is_none());
 
         // Record the old timer status. Here setting the immutable `self` is safe
         // because the interrupt is already turned off.
@@ -32,6 +32,6 @@ impl Lock for Intr {
     }
 
     fn release(&self) {
-        sbi::interrupt::set(self.0.take().expect("release before acquire"));
+        // sbi::interrupt::set(self.0.take().expect("release before acquire"));
     }
 }

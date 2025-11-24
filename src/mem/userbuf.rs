@@ -11,7 +11,7 @@ use crate::Result;
 /// ## Return
 /// - `Ok(byte)`
 /// - `Err`: A page fault happened.
-fn read_user_byte(user_src: *const u8) -> Result<u8> {
+pub fn read_user_byte(user_src: *const u8) -> Result<u8> {
     if in_kernel_space(user_src as usize) {
         return Err(OsError::BadPtr);
     }
@@ -26,12 +26,21 @@ fn read_user_byte(user_src: *const u8) -> Result<u8> {
     }
 }
 
+pub fn read_user_usize(user_src: *const usize) -> Result<usize> {
+    let ptr = user_src as usize;
+    let mut result: usize = 0;
+    for i in 0..core::mem::size_of::<usize>() {
+        result |= ((read_user_byte((ptr + i) as *const u8)? as usize) << (i * 8));
+    }
+    Ok(result)
+}
+
 /// Write a single byte to user space.
 ///
 /// ## Return
 /// - `Ok(())`
 /// - `Err`: A page fault happened.
-fn write_user_byte(user_src: *const u8, value: u8) -> Result<()> {
+pub fn write_user_byte(user_src: *const u8, value: u8) -> Result<()> {
     if in_kernel_space(user_src as usize) {
         return Err(OsError::BadPtr);
     }
@@ -43,6 +52,14 @@ fn write_user_byte(user_src: *const u8, value: u8) -> Result<()> {
     } else {
         Err(OsError::BadPtr)
     }
+}
+
+pub fn write_user_usize(user_src: *const usize, value: usize) -> Result<()> {
+    let ptr = user_src as usize;
+    for i in 0..core::mem::size_of::<usize>() {
+        write_user_byte((ptr + i) as *const u8, ((value >> (i * 8)) & 0xFF) as u8)?;
+    }
+    Ok(())
 }
 
 extern "C" {

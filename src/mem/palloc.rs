@@ -281,7 +281,7 @@ fn swap_page() -> bool {
                         .write(&buf[..size])
                         .is_err() {
                     let swap_pos = Swap::new_page();
-                    let eptinfo = MapInfo::new(
+                    let sptinfo = MapInfo::new(
                         -1,
                         None,
                         swap_pos,
@@ -299,11 +299,11 @@ fn swap_page() -> bool {
                     pt.acquire();
                     spt.acquire();
 
-                    spt.list.push(eptinfo);
+                    spt.list.push(sptinfo);
                 }
             }
             unsafe {
-                UserPool::dealloc_pages(pte.pa().into_va() as *mut _, 1);
+                UserPool::dealloc_pages((pte.pa().into_va()) as *mut _, 1);
             }
             pte.set_invalid();
         } else {
