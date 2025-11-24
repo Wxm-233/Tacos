@@ -14,6 +14,8 @@ pub mod palloc;
 pub mod userbuf;
 mod utils;
 
+pub mod mappingtable;
+
 use core::mem::size_of;
 
 pub use self::layout::*;

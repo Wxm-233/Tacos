@@ -87,7 +87,7 @@ impl PageTable {
         })
     }
 
-    pub fn get_pte_mut(&mut self, va: usize) -> Option<&mut Entry> {
+    pub fn get_pte_mut(&self, va: usize) -> Option<&mut Entry> {
         self.walk(Self::px(2, va)).and_then(|l1_table| {
             l1_table
                 .walk(Self::px(1, va))

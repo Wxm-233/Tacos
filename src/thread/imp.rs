@@ -6,6 +6,7 @@ use core::arch::global_asm;
 use core::fmt::{self, Debug};
 use core::sync::atomic::{AtomicIsize, AtomicU32, Ordering::SeqCst};
 
+use crate::mem::mappingtable::MappingTable;
 use crate::mem::{kalloc, kfree, PageTable, PG_SIZE};
 use crate::sbi::interrupt;
 use crate::sync::Semaphore;
@@ -42,6 +43,9 @@ pub struct Thread {
     pub children: Mutex<Vec<ChildInfo>>,
     pub parent: Mutex<Option<Arc<Thread>>>,
     pub fdlist: Mutex<FDList>,
+
+    pub mapping_table: Mutex<MappingTable>,
+    pub extra_pagetable: Mutex<MappingTable>,
 }
 
 impl Thread {
@@ -54,6 +58,7 @@ impl Thread {
         pagetable: Option<PageTable>,
 
         parent: Option<Arc<Thread>>,
+        mappingtable: Option<MappingTable>,
     ) -> Self {
         /// The next thread's id
         static TID: AtomicIsize = AtomicIsize::new(0);
@@ -71,6 +76,9 @@ impl Thread {
             parent: Mutex::new(parent),
             children: Mutex::new(Vec::new()),
             fdlist: Mutex::new(FDList::new()),
+
+            mapping_table: Mutex::new(mappingtable.unwrap_or(MappingTable::new())),
+            extra_pagetable: Mutex::new(MappingTable::new()),
         }
     }
 
@@ -146,6 +154,7 @@ pub struct Builder {
     pagetable: Option<PageTable>,
 
     parent: Option<Arc<Thread>>,
+    mappingtable: Option<MappingTable>,
 }
 
 impl Builder {
@@ -163,6 +172,7 @@ impl Builder {
             userproc: None,
             pagetable: None,
             parent: None,
+            mappingtable: None,
         }
     }
 
@@ -191,6 +201,11 @@ impl Builder {
         self
     }
 
+    pub fn set_mapping_table(mut self, mappingtable: MappingTable) -> Self {
+        self.mappingtable = Some(mappingtable);
+        self
+    }
+
     pub fn build(self) -> Arc<Thread> {
         let stack = kalloc(STACK_SIZE, STACK_ALIGN) as usize;
 
@@ -205,6 +220,7 @@ impl Builder {
             self.userproc,
             self.pagetable,
             self.parent,
+            self.mappingtable,
         ))
     }
 

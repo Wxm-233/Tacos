@@ -222,5 +222,35 @@ fn swap_page() -> bool {
         if !pte.is_valid() {
             panic!("page not present when swapping out");
         }
+
+        let mut mapping_table = thread.mapping_table.lock();
+        let mut ept = thread.extra_pagetable.lock();
+        if let Some((pos, _)) = ept
+            .list
+            .iter()
+            .enumerate()
+            .find(|(_, x) | x.contains(va)) {
+
+            let mapinfo = mapping_table.list.get_mut(pos).unwrap();
+            if pte.is_dirty() {
+                let l = (va - mapinfo.va).floor();
+                let size = (mapinfo.memsize - l).min(PG_SIZE);
+                let buf = unsafe {
+                    (pte.pa().into_va() as *const [u8; PG_SIZE])
+                        .as_ref()
+                        .unwrap()
+                };
+                if mapinfo.mapid == -1
+                    || mapinfo
+                        .file
+                        .as_mut()
+                        .unwrap()
+                        .write(&buf[..size])
+                        .is_err() {
+                    
+                }
+            }
+        }
     }
+    true
 }
