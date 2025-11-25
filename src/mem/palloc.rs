@@ -235,7 +235,6 @@ fn swap_page() -> bool {
             let sptinfo = spt.list.get(pos).unwrap();
             if pte.is_dirty() {
                 let l = (va - sptinfo.va).floor();
-                assert!((va - sptinfo.va).floor() == 0);
                 let size = (sptinfo.memsize - l).min(PG_SIZE);
                 let buf = unsafe {
                     (pte.pa().into_va() as *const [u8; PG_SIZE])

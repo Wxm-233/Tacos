@@ -44,15 +44,11 @@ pub fn spt_handler(frame: &Frame, va: usize) -> bool {
     if let Some(mapinfo) = spt.list.iter().find(|m| m.contains(va)).map(|m| m.clone()) {
         let pos = (va - mapinfo.va).floor();
         let mut pt = unsafe { PageTable::effective_pagetable() };
-        let entry =  pt.get_pte(va);
-        assert!(!entry.map(|e| e.is_valid()).unwrap_or(false));
         spt.release();
         let start_va = unsafe { UserPool::alloc_pages(1) as usize };
         let start_pa = PhysAddr::from(start_va);
         let buf = unsafe { (start_va as *mut [u8; PG_SIZE]).as_mut().unwrap() };
-        let limit = (mapinfo.memsize.max(pos) - pos).min(PG_SIZE);
-        assert!(limit == PG_SIZE);
-        let size = Swap::read_page(pos + mapinfo.offset, &mut buf[..limit]);
+        let size = Swap::read_page(pos + mapinfo.offset, &mut buf[..PG_SIZE]);
         buf[size..].fill(0);
         spt.acquire();
 
@@ -83,9 +79,6 @@ pub fn mmap_handler(frame: &Frame, va: usize) -> bool {
             .unwrap();
 
         let mut current_pt = unsafe { PageTable::effective_pagetable() };
-
-        let entry = current_pt.get_pte(va);
-        assert!(!entry.map(|e| e.is_valid()).unwrap_or(false));
 
         let start_va = unsafe { UserPool::alloc_pages(1) as usize };
         let start_pa = PhysAddr::from(start_va);
@@ -121,22 +114,6 @@ pub fn handler(frame: &mut Frame, fault: Exception, addr: usize) {
     };
 
     unsafe { sstatus::set_sie() };
-
-    // kprintln!(
-    //     "Page fault at {:#x}: {} error {} page in {} context.",
-    //     addr,
-    //     if present { "rights" } else { "not present" },
-    //     match fault {
-    //         StorePageFault => "writing",
-    //         LoadPageFault => "reading",
-    //         InstructionPageFault => "fetching instruction",
-    //         _ => panic!("Unknown Page Fault"),
-    //     },
-    //     match privilege {
-    //         SPP::Supervisor => "kernel",
-    //         SPP::User => "user",
-    //     }
-    // );
 
     match privilege {
         SPP::Supervisor => {

@@ -8,7 +8,7 @@ use crate::mem::utils::{PhysAddr, PG_SHIFT};
 /// | Unused | PPN[2] | PPN[1] | PPN[0] | RSW |D|A|G|U|X|W|R|V|
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug)]
-pub struct Entry(pub usize);
+pub struct Entry(usize);
 
 bitflags::bitflags! {
     pub struct PTEFlags: usize {

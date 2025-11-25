@@ -85,9 +85,6 @@ impl Manager {
         let next = self.scheduler.lock().schedule();
 
         // Make sure there's at least one thread runnable.
-		if !(self.current.lock().status() == Status::Running || next.is_some()) {
-            self.all.lock().iter().for_each(|x| kprint!("({:?}) ", x));
-        }
         assert!(
             self.current.lock().status() == Status::Running || next.is_some(),
             "no thread is ready"
