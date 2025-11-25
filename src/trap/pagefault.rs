@@ -140,14 +140,14 @@ pub fn handler(frame: &mut Frame, fault: Exception, addr: usize) {
 
     match privilege {
         SPP::Supervisor => {
-            let handled = 
-                !present && (
-                spt_handler(frame, addr)
-                || stack_growth_handler(frame, addr, false)
-                || mmap_handler(frame, addr));
-            if handled {
-                kprintln!("Kernel page fault handled.");
-                return;
+            if !present {
+                if spt_handler(frame, addr) {
+                    return;
+                } else if stack_growth_handler(frame, addr, false) {
+                    return;
+                } else if mmap_handler(frame, addr) {
+                    return;
+                }
             }
             if frame.sepc == __knrl_read_usr_byte_pc as _ {
                 // Failed to read user byte from kernel space when trap in pagefault
@@ -162,14 +162,14 @@ pub fn handler(frame: &mut Frame, fault: Exception, addr: usize) {
             }
         }
         SPP::User => {
-            let handled = 
-                !present && (
-                spt_handler(frame, addr)
-                || stack_growth_handler(frame, addr, true)
-                || mmap_handler(frame, addr));
-            if handled {
-                kprintln!("User page fault handled.");
-                return;
+            if !present {
+                if spt_handler(frame, addr) {
+                    return;
+                } else if stack_growth_handler(frame, addr, true) {
+                    return;
+                } else if mmap_handler(frame, addr) {
+                    return;
+                }
             }
             kprintln!(
                 "User thread {} dying due to page fault.",
